@@ -22,6 +22,13 @@ class CategoryUpdate(BaseSchema):
     description: str | None = Field(default=None, max_length=500)
     is_active: bool | None = None
 
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "CategoryUpdate":
+        for field in {"name", "is_active"} & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
 
 class CategoryResponse(ModelResponse):
     parent_id: UUID | None
@@ -40,6 +47,13 @@ class BrandUpdate(BaseSchema):
     name: str | None = Field(default=None, min_length=2, max_length=150)
     description: str | None = Field(default=None, max_length=500)
     is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "BrandUpdate":
+        for field in {"name", "is_active"} & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class BrandResponse(ModelResponse):
@@ -83,6 +97,17 @@ class ProductVariantResponse(ModelResponse):
     is_active: bool
 
 
+class CatalogVariantResponse(ModelResponse):
+    product_id: UUID
+    name: str
+    sku: str
+    barcode: str | None
+    tracking_type: TrackingType
+    attributes: dict
+    selling_price: Decimal
+    is_active: bool
+
+
 class ProductVariantUpdate(BaseSchema):
     name: str | None = Field(default=None, min_length=1, max_length=150)
     barcode: str | None = Field(default=None, max_length=100)
@@ -106,6 +131,15 @@ class ProductVariantUpdate(BaseSchema):
             and self.minimum_selling_price > self.selling_price
         ):
             raise ValueError("minimum_selling_price cannot exceed selling_price")
+        for field in {
+            "name",
+            "attributes",
+            "cost_price",
+            "selling_price",
+            "is_active",
+        } & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
         return self
 
 
@@ -119,6 +153,13 @@ class ProductImageUpdate(BaseSchema):
     url: str | None = Field(default=None, min_length=1, max_length=500)
     alt_text: str | None = Field(default=None, max_length=255)
     position: int | None = Field(default=None, ge=0)
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "ProductImageUpdate":
+        for field in {"url", "position"} & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class ProductImageResponse(ModelResponse):
@@ -147,7 +188,17 @@ class ProductUpdate(BaseSchema):
     brand_id: UUID | None = None
     warranty_months: int | None = Field(default=None, ge=0, le=120)
     is_active: bool | None = None
-    is_published: bool | None = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "ProductUpdate":
+        for field in {"name", "warranty_months", "is_active"} & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
+
+
+class ProductPublicationUpdate(BaseSchema):
+    is_published: bool
 
 
 class ProductResponse(ModelResponse):
@@ -161,3 +212,34 @@ class ProductResponse(ModelResponse):
     is_published: bool
     variants: list[ProductVariantResponse] = Field(default_factory=list)
     images: list[ProductImageResponse] = Field(default_factory=list)
+
+
+class CatalogProductResponse(ModelResponse):
+    name: str
+    slug: str
+    description: str | None
+    category_id: UUID | None
+    brand_id: UUID | None
+    warranty_months: int
+    is_active: bool
+    is_published: bool
+    variants: list[CatalogVariantResponse] = Field(default_factory=list)
+    images: list[ProductImageResponse] = Field(default_factory=list)
+
+
+class CatalogImportError(BaseSchema):
+    row: int
+    column: str | None = None
+    message: str
+
+
+class CatalogImportValidationResponse(BaseSchema):
+    total_rows: int
+    valid_rows: int
+    can_import: bool
+    errors: list[CatalogImportError] = Field(default_factory=list)
+
+
+class CatalogImportResponse(BaseSchema):
+    created_products: int
+    created_variants: int
