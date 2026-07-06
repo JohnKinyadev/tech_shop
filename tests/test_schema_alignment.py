@@ -30,6 +30,7 @@ from backend.models.sales import (
     Till,
     TillSession,
 )
+from backend.models.stocktake import StockCount, StockCountItem
 from backend.models.suppliers import Supplier
 from backend.models.users import User
 from backend.models.warranty import Warranty
@@ -73,6 +74,7 @@ from backend.schemas.sales_schemas import (
     TillResponse,
     TillSessionResponse,
 )
+from backend.schemas.stocktake_schemas import StockCountItemResponse, StockCountResponse
 from backend.schemas.supplier_schemas import SupplierResponse
 from backend.schemas.user_schemas import (
     PermissionResponse,
@@ -96,6 +98,8 @@ PAIRS = [
     (StockMovement, StockMovementResponse, set()),
     (StockTransfer, StockTransferResponse, {"items"}),
     (StockTransferItem, StockTransferItemResponse, set()),
+    (StockCount, StockCountResponse, {"items"}),
+    (StockCountItem, StockCountItemResponse, set()),
     (Payment, PaymentResponse, set()),
     (Permission, PermissionResponse, set()),
     (Category, CategoryResponse, set()),

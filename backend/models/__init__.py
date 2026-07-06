@@ -31,6 +31,7 @@ from backend.models.sales import (
     TillSession,
 )
 from backend.models.suppliers import Supplier
+from backend.models.stocktake import StockCount, StockCountItem
 from backend.models.users import User
 from backend.models.warranty import Warranty
 
@@ -65,6 +66,8 @@ __all__ = [
     "SaleReturnItem",
     "SerializedUnit",
     "StockBalance",
+    "StockCount",
+    "StockCountItem",
     "StockMovement",
     "StockReservation",
     "StockTransfer",

@@ -51,6 +51,13 @@ class TransferStatus(StringEnum):
     CANCELLED = "cancelled"
 
 
+class StockCountStatus(StringEnum):
+    DRAFT = "draft"
+    SUBMITTED = "submitted"
+    APPROVED = "approved"
+    CANCELLED = "cancelled"
+
+
 class PurchaseStatus(StringEnum):
     DRAFT = "draft"
     SUBMITTED = "submitted"
