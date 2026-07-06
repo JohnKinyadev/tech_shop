@@ -152,6 +152,9 @@ class SaleReturn(BaseModel):
     sale_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("sales.id"), nullable=False
     )
+    till_session_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("till_sessions.id"), nullable=True
+    )
     return_number: Mapped[str] = mapped_column(String(50), unique=True, nullable=False)
     requested_by_id: Mapped[UUID] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("users.id"), nullable=False

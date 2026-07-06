@@ -11,6 +11,7 @@ from backend.schemas.base_schemas import BaseSchema, ModelResponse
 class PaymentCreate(BaseSchema):
     branch_id: UUID
     sale_id: UUID | None = None
+    till_session_id: UUID | None = None
     repair_ticket_id: UUID | None = None
     purchase_order_id: UUID | None = None
     direction: PaymentDirection
@@ -28,9 +29,18 @@ class PaymentCreate(BaseSchema):
         return self
 
 
+class SalePaymentCreate(BaseSchema):
+    method: PaymentMethod
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    provider_reference: str | None = Field(default=None, max_length=150)
+    idempotency_key: str = Field(min_length=8, max_length=150)
+    notes: str | None = Field(default=None, max_length=500)
+
+
 class PaymentResponse(ModelResponse):
     branch_id: UUID
     sale_id: UUID | None
+    till_session_id: UUID | None
     repair_ticket_id: UUID | None
     purchase_order_id: UUID | None
     direction: PaymentDirection

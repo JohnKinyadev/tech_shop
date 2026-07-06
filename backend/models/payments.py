@@ -24,6 +24,9 @@ class Payment(BaseModel):
     sale_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("sales.id"), nullable=True
     )
+    till_session_id: Mapped[UUID | None] = mapped_column(
+        PG_UUID(as_uuid=True), ForeignKey("till_sessions.id"), nullable=True, index=True
+    )
     repair_ticket_id: Mapped[UUID | None] = mapped_column(
         PG_UUID(as_uuid=True), ForeignKey("repair_tickets.id"), nullable=True
     )

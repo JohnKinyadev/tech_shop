@@ -6,6 +6,7 @@ from pydantic import Field
 
 from backend.models.enums import (
     FulfillmentStatus,
+    PaymentMethod,
     SaleChannel,
     SaleStatus,
     TillSessionStatus,
@@ -80,6 +81,18 @@ class SaleItemResponse(ModelResponse):
     line_total: Decimal
 
 
+class POSSaleItemResponse(ModelResponse):
+    sale_id: UUID
+    variant_id: UUID
+    serialized_unit_id: UUID | None
+    description: str
+    quantity: int
+    unit_price: Decimal
+    discount_amount: Decimal
+    tax_amount: Decimal
+    line_total: Decimal
+
+
 class SaleResponse(ModelResponse):
     branch_id: UUID
     customer_id: UUID | None
@@ -99,13 +112,39 @@ class SaleResponse(ModelResponse):
     items: list[SaleItemResponse] = Field(default_factory=list)
 
 
+class POSSaleResponse(ModelResponse):
+    branch_id: UUID
+    customer_id: UUID | None
+    cashier_id: UUID | None
+    till_session_id: UUID | None
+    invoice_number: str
+    channel: SaleChannel
+    status: SaleStatus
+    fulfillment_status: FulfillmentStatus
+    subtotal: Decimal
+    tax_amount: Decimal
+    discount_amount: Decimal
+    total_amount: Decimal
+    paid_amount: Decimal
+    notes: str | None
+    completed_at: datetime | None
+    items: list[POSSaleItemResponse] = Field(default_factory=list)
+
+
+class SaleVoidRequest(BaseSchema):
+    till_session_id: UUID
+    reason: str = Field(min_length=3, max_length=500)
+
+
 class SaleReturnItemCreate(BaseSchema):
     sale_item_id: UUID
     quantity: int = Field(gt=0)
     condition: str = Field(min_length=2, max_length=30)
+    restock: bool = False
 
 
 class SaleReturnCreate(BaseSchema):
+    till_session_id: UUID
     reason: str = Field(min_length=3, max_length=500)
     items: list[SaleReturnItemCreate] = Field(min_length=1)
 
@@ -120,6 +159,7 @@ class SaleReturnItemResponse(ModelResponse):
 
 class SaleReturnResponse(ModelResponse):
     sale_id: UUID
+    till_session_id: UUID | None
     return_number: str
     requested_by_id: UUID
     approved_by_id: UUID | None
@@ -127,3 +167,29 @@ class SaleReturnResponse(ModelResponse):
     reason: str
     refund_amount: Decimal
     items: list[SaleReturnItemResponse] = Field(default_factory=list)
+
+
+class ReceiptPaymentLine(BaseSchema):
+    method: PaymentMethod
+    amount: Decimal
+    provider_reference: str | None
+    paid_at: datetime | None
+
+
+class ReceiptResponse(BaseSchema):
+    invoice_number: str
+    sale_status: SaleStatus
+    branch_name: str
+    branch_code: str
+    branch_address: str | None
+    customer_name: str | None
+    customer_phone: str | None
+    cashier_name: str | None
+    items: list[POSSaleItemResponse]
+    payments: list[ReceiptPaymentLine]
+    subtotal: Decimal
+    tax_amount: Decimal
+    discount_amount: Decimal
+    total_amount: Decimal
+    paid_amount: Decimal
+    completed_at: datetime | None
