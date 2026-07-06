@@ -1,6 +1,6 @@
 from uuid import UUID
 
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, model_validator
 
 from backend.schemas.base_schemas import BaseSchema, ModelResponse
 
@@ -40,6 +40,13 @@ class RoleResponse(ModelResponse):
     permissions: list[PermissionResponse] = Field(default_factory=list)
 
 
+class AssignableRoleResponse(BaseSchema):
+    id: UUID
+    code: str
+    name: str
+    description: str | None
+
+
 class UserCreate(BaseSchema):
     full_name: str = Field(min_length=2, max_length=150)
     username: str = Field(min_length=3, max_length=100)
@@ -58,6 +65,14 @@ class UserUpdate(BaseSchema):
     branch_id: UUID | None = None
     is_active: bool | None = None
     is_verified: bool | None = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "UserUpdate":
+        required = {"full_name", "email", "role_id", "is_active", "is_verified"}
+        for field in required & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class UserResponse(ModelResponse):
