@@ -1,0 +1,1 @@
+"""Tech shop backend package."""
