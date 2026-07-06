@@ -18,6 +18,21 @@ class StockBalanceResponse(ModelResponse):
     last_stock_take_at: datetime | None
 
 
+class InventoryBalanceView(BaseSchema):
+    stock_balance_id: UUID
+    branch_id: UUID
+    product_id: UUID
+    product_name: str
+    variant_id: UUID
+    variant_name: str
+    sku: str
+    quantity_on_hand: int
+    reserved_quantity: int
+    available_quantity: int
+    reorder_level: int
+    is_low_stock: bool
+
+
 class SerializedUnitCreate(BaseSchema):
     variant_id: UUID
     branch_id: UUID
@@ -41,6 +56,21 @@ class SerializedUnitResponse(ModelResponse):
     imei: str | None
     status: SerializedUnitStatus
     unit_cost: Decimal
+    condition: str
+    received_at: datetime
+
+
+class SerializedUnitView(BaseSchema):
+    id: UUID
+    branch_id: UUID
+    product_id: UUID
+    product_name: str
+    variant_id: UUID
+    variant_name: str
+    sku: str
+    serial_number: str | None
+    imei: str | None
+    status: SerializedUnitStatus
     condition: str
     received_at: datetime
 
