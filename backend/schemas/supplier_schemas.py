@@ -1,4 +1,4 @@
-from pydantic import EmailStr, Field
+from pydantic import EmailStr, Field, model_validator
 
 from backend.schemas.base_schemas import BaseSchema, ModelResponse
 
@@ -22,6 +22,17 @@ class SupplierUpdate(BaseSchema):
     tax_number: str | None = Field(default=None, max_length=100)
     payment_terms_days: int | None = Field(default=None, ge=0, le=365)
     is_active: bool | None = None
+
+    @model_validator(mode="after")
+    def reject_null_required_fields(self) -> "SupplierUpdate":
+        for field in {
+            "name",
+            "payment_terms_days",
+            "is_active",
+        } & self.model_fields_set:
+            if getattr(self, field) is None:
+                raise ValueError(f"{field} cannot be null")
+        return self
 
 
 class SupplierResponse(ModelResponse):
