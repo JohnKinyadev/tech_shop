@@ -2,6 +2,14 @@
 
 The backend is a modular FastAPI application backed by SQLAlchemy 2 and PostgreSQL.
 
+For the full backend map, endpoint table, demo users, schema locations, and file-by-file
+reference, see [`PROJECT_REFERENCE.md`](./PROJECT_REFERENCE.md).
+
+System health checks:
+
+- `GET /health` checks that the app process is running.
+- `GET /health/db` checks that the backend can reach PostgreSQL.
+
 ## API structure
 
 Endpoint modules live in `backend/api/v1/routers/`. Shared dependencies and HTTP error
@@ -42,6 +50,21 @@ Create the first headquarters branch and Admin interactively with:
 ```powershell
 python -m backend.cli.bootstrap_admin --full-name "Owner Name" --username owner `
   --email owner@example.com --branch-name "Main Branch" --branch-code HQ
+```
+
+Seed demo data across the staff API with:
+
+```powershell
+python -m backend.cli.seed_demo
+```
+
+The demo seed creates reusable branches, users, catalog items, stock, POS, repairs,
+expenses, and report data. Default demo password is `DemoPass123!`.
+
+Run a read-only backend smoke check after seeding with:
+
+```powershell
+python -m backend.cli.smoke
 ```
 
 Branch and staff management are available under `/api/v1/staff/branches`,
@@ -95,6 +118,31 @@ is restored through the inventory ledger, and each incoming or outgoing payment 
 the till session that physically handled it. Till close calculates expected cash from the
 opening float, cash sales, and cash refunds.
 
-The next implementation slice is the repair pipeline: customer intake, diagnosis, quotes,
-technician assignment, parts usage, status history, repair invoicing, collection, and
-ready-for-pickup notifications.
+Repair management is available under `/api/v1/staff/repairs`. Branch Managers and Admins
+create bookings, record device intake, and assign technicians from the same branch.
+Technicians can only access assigned tickets; they record diagnosis and quotes, capture
+customer approval, move repairs through the controlled status pipeline, and log parts at
+server-controlled prices. Logged parts are deducted through the central inventory ledger
+and can be restored before a repair is closed if an entry was made in error.
+
+Repair invoices are calculated from approved labor and actual parts usage rather than
+stored as duplicated totals. Checkout staff can receive repair payments through their own
+open till without gaining access to diagnosis or inventory cost. Fully paid, ready repairs
+can be marked collected. Moving a ticket to ready-for-pickup writes an auditable
+notification-pending event for the later SMS integration.
+
+Expense management is available under `/api/v1/staff/expenses`. Admins and Branch Managers
+can maintain shared expense categories, create branch-scoped expense records, edit pending
+expenses, and approve, reject, or cancel them. Accountants get read-only access through the
+separate `expenses.view` permission, which keeps financial visibility independent from
+operational authority.
+
+Operational reports are available under `/api/v1/staff/reports`. The first report slice
+provides read-only dashboard, sales, inventory, repair, and expense summaries. Reports are
+calculated from live operational records rather than stored totals, remain branch-scoped
+for non-Admin staff, and allow technicians to view only their own assigned repair report
+scope.
+
+The next implementation slice is hardening: live PostgreSQL smoke checks for the newest
+workflows, export-friendly report formats, and then preparation for the customer-facing
+website API.
