@@ -41,6 +41,10 @@ class ExpenseUpdate(BaseSchema):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class ExpenseDecision(BaseSchema):
+    notes: str | None = Field(default=None, max_length=500)
+
+
 class ExpenseResponse(ModelResponse):
     branch_id: UUID
     category_id: UUID

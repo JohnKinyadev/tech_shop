@@ -9,6 +9,7 @@ from backend.models.enums import SerializedUnitStatus, StockMovementType, Tracki
 from backend.models.inventory import SerializedUnit, StockBalance
 from backend.models.inventory_movement import StockMovement
 from backend.models.products import ProductVariant
+from backend.models.repairs import RepairPart
 from backend.models.sales import SaleItem
 from backend.services.exceptions import ConflictError, NotFoundError, ValidationError
 
@@ -425,5 +426,130 @@ def return_sale_stock(
             idempotency_key=(f"{reference_type}:{reference_id}:item:{sale_item.id}"),
             performed_by_id=performed_by_id,
             note=condition,
+        )
+    )
+
+
+def consume_repair_part(
+    db: Session,
+    *,
+    branch_id: UUID,
+    repair_ticket_id: UUID,
+    part: RepairPart,
+    variant: ProductVariant,
+    performed_by_id: UUID,
+) -> None:
+    balance = db.scalar(
+        select(StockBalance)
+        .where(
+            StockBalance.branch_id == branch_id,
+            StockBalance.variant_id == part.variant_id,
+            StockBalance.is_deleted.is_(False),
+        )
+        .with_for_update()
+    )
+    available = balance.quantity_on_hand - balance.reserved_quantity if balance else 0
+    if balance is None or available < part.quantity:
+        raise ConflictError("repair part quantity exceeds available stock")
+
+    unit: SerializedUnit | None = None
+    if variant.tracking_type == TrackingType.BULK:
+        if part.serialized_unit_id is not None:
+            raise ValidationError("bulk repair parts cannot reference a unit")
+    else:
+        if part.serialized_unit_id is None or part.quantity != 1:
+            raise ValidationError("serialized repair parts require one specific unit")
+        unit = db.scalar(
+            select(SerializedUnit)
+            .where(
+                SerializedUnit.id == part.serialized_unit_id,
+                SerializedUnit.variant_id == part.variant_id,
+                SerializedUnit.branch_id == branch_id,
+            )
+            .with_for_update()
+        )
+        if unit is None:
+            raise NotFoundError("serialized repair part was not found")
+        if unit.status != SerializedUnitStatus.AVAILABLE:
+            raise ConflictError("serialized repair part is unavailable")
+        unit.status = SerializedUnitStatus.SOLD
+
+    balance.quantity_on_hand -= part.quantity
+    db.add(
+        StockMovement(
+            branch_id=branch_id,
+            variant_id=part.variant_id,
+            serialized_unit_id=part.serialized_unit_id,
+            movement_type=StockMovementType.REPAIR_USAGE,
+            quantity_delta=-part.quantity,
+            unit_cost=part.unit_cost,
+            reference_type="repair_ticket",
+            reference_id=repair_ticket_id,
+            idempotency_key=f"repair:{repair_ticket_id}:part:{part.id}",
+            performed_by_id=performed_by_id,
+        )
+    )
+
+
+def restore_repair_part(
+    db: Session,
+    *,
+    branch_id: UUID,
+    repair_ticket_id: UUID,
+    part: RepairPart,
+    variant: ProductVariant,
+    performed_by_id: UUID,
+) -> None:
+    balance = db.scalar(
+        select(StockBalance)
+        .where(
+            StockBalance.branch_id == branch_id,
+            StockBalance.variant_id == part.variant_id,
+            StockBalance.is_deleted.is_(False),
+        )
+        .with_for_update()
+    )
+    if balance is None:
+        balance = StockBalance(
+            branch_id=branch_id,
+            variant_id=part.variant_id,
+            quantity_on_hand=0,
+            reserved_quantity=0,
+            reorder_level=0,
+            average_unit_cost=Decimal("0.00"),
+        )
+        db.add(balance)
+    if variant.tracking_type != TrackingType.BULK:
+        unit = db.scalar(
+            select(SerializedUnit)
+            .where(SerializedUnit.id == part.serialized_unit_id)
+            .with_for_update()
+        )
+        if unit is None:
+            raise NotFoundError("serialized repair part was not found")
+        if unit.status != SerializedUnitStatus.SOLD:
+            raise ConflictError("serialized repair part cannot be restored")
+        unit.status = SerializedUnitStatus.AVAILABLE
+
+    balance.average_unit_cost = weighted_average_cost(
+        balance.quantity_on_hand,
+        balance.average_unit_cost,
+        part.quantity,
+        part.unit_cost,
+    )
+    balance.quantity_on_hand += part.quantity
+    db.add(
+        StockMovement(
+            branch_id=branch_id,
+            variant_id=part.variant_id,
+            serialized_unit_id=part.serialized_unit_id,
+            movement_type=StockMovementType.RETURN,
+            quantity_delta=part.quantity,
+            unit_cost=part.unit_cost,
+            reference_type="repair_part_removal",
+            reference_id=part.id,
+            idempotency_key=f"repair:{repair_ticket_id}:part:{part.id}:restored",
+            performed_by_id=performed_by_id,
+            note="Repair part entry removed",
         )
     )

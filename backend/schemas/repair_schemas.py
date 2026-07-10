@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from backend.models.enums import RepairStatus
+from backend.models.enums import PaymentMethod, RepairStatus
 from backend.schemas.base_schemas import BaseSchema, ModelResponse
 
 
@@ -41,7 +41,6 @@ class RepairPartCreate(BaseSchema):
     variant_id: UUID
     serialized_unit_id: UUID | None = None
     quantity: int = Field(gt=0)
-    unit_price: Decimal = Field(ge=0)
 
 
 class RepairPartResponse(ModelResponse):
@@ -53,9 +52,35 @@ class RepairPartResponse(ModelResponse):
     unit_price: Decimal
 
 
+class RepairPartView(ModelResponse):
+    repair_ticket_id: UUID
+    variant_id: UUID
+    serialized_unit_id: UUID | None
+    quantity: int
+    unit_price: Decimal
+
+
 class RepairStatusUpdate(BaseSchema):
     status: RepairStatus
     note: str | None = Field(default=None, max_length=500)
+
+
+class RepairNote(BaseSchema):
+    note: str | None = Field(default=None, max_length=500)
+
+
+class RepairQuoteDecision(BaseSchema):
+    approved: bool
+    note: str | None = Field(default=None, max_length=500)
+
+
+class RepairPaymentCreate(BaseSchema):
+    till_session_id: UUID
+    method: PaymentMethod
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    provider_reference: str | None = Field(default=None, max_length=150)
+    idempotency_key: str = Field(min_length=8, max_length=150)
+    notes: str | None = Field(default=None, max_length=500)
 
 
 class RepairStatusHistoryResponse(ModelResponse):
@@ -92,3 +117,38 @@ class RepairTicketResponse(ModelResponse):
     collected_at: datetime | None
     parts: list[RepairPartResponse] = Field(default_factory=list)
     status_history: list[RepairStatusHistoryResponse] = Field(default_factory=list)
+
+
+class RepairTicketView(RepairTicketResponse):
+    parts: list[RepairPartView] = Field(default_factory=list)
+
+
+class RepairInvoicePayment(BaseSchema):
+    method: PaymentMethod
+    amount: Decimal
+    provider_reference: str | None
+    paid_at: datetime | None
+
+
+class RepairInvoiceResponse(BaseSchema):
+    ticket_id: UUID
+    ticket_number: str
+    branch_id: UUID
+    customer_id: UUID
+    customer_name: str
+    customer_phone: str
+    device_description: str
+    labor_amount: Decimal
+    parts_amount: Decimal
+    total_amount: Decimal
+    paid_amount: Decimal
+    balance_due: Decimal
+    payment_status: str
+    payments: list[RepairInvoicePayment] = Field(default_factory=list)
+
+
+class RepairCollectionResponse(BaseSchema):
+    ticket_id: UUID
+    ticket_number: str
+    status: RepairStatus
+    collected_at: datetime
