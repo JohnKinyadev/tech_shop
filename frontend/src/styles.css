@@ -989,6 +989,94 @@ button:disabled {
   margin: 0;
 }
 
+.inventory-desk {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.65fr) minmax(320px, 0.8fr);
+  gap: 15px;
+  align-items: stretch;
+}
+
+.inventory-focus-card__body {
+  display: grid;
+  gap: 13px;
+  padding: 15px;
+}
+
+.inventory-focus-card__body > div:first-child {
+  display: grid;
+  gap: 5px;
+}
+
+.inventory-focus-card__body span,
+.stock-action-context span,
+.inventory-watchlist span,
+.serialized-unit-list span,
+.serialized-unit-list small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.inventory-mini-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.inventory-mini-stats span {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.inventory-mini-stats b {
+  color: var(--text);
+  font-size: 18px;
+}
+
+.inventory-watchlist,
+.serialized-unit-list {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+}
+
+.inventory-watchlist button,
+.serialized-unit-list article,
+.stock-action-context {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.inventory-watchlist button {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.inventory-watchlist button:hover {
+  border-color: #b9d8f0;
+  background: #f4f9fd;
+}
+
+.serialized-unit-list article div {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  justify-content: space-between;
+}
+
+.stock-action-context {
+  background: #f8fbfd;
+}
+
 .module-page {
   display: grid;
   gap: 15px;

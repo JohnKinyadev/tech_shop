@@ -12,6 +12,7 @@ import {
   listAdjustmentRequests,
   listBranches,
   listInventoryBalances,
+  listSerializedUnits,
   listStockCounts,
   listStockMovements,
   listStockTransfers,
@@ -24,6 +25,7 @@ import type {
   ApprovalRequest,
   Branch,
   InventoryBalance,
+  SerializedUnit,
   StockCount,
   StockMovement,
   StockTransfer,
@@ -33,6 +35,7 @@ import {
   demoAdjustmentRequests,
   demoBranches,
   demoInventoryBalances,
+  demoSerializedUnits,
   demoStockCounts,
   demoStockMovements,
   demoStockTransfers,
@@ -98,6 +101,8 @@ export function InventoryPage() {
     user?.branch_id ?? demoBranches[0]?.id ?? "",
   );
   const [balances, setBalances] = useState<InventoryBalance[]>(demoInventoryBalances);
+  const [serializedUnits, setSerializedUnits] =
+    useState<SerializedUnit[]>(demoSerializedUnits);
   const [movements, setMovements] = useState<StockMovement[]>(demoStockMovements);
   const [adjustments, setAdjustments] =
     useState<ApprovalRequest[]>(demoAdjustmentRequests);
@@ -133,6 +138,16 @@ export function InventoryPage() {
     [balances, countForm.stock_balance_id],
   );
 
+  const selectedStockBalance = useMemo(
+    () =>
+      balances.find(
+        (item) => item.stock_balance_id === adjustmentForm.stock_balance_id,
+      ) ??
+      selectedAdjustmentBalance ??
+      balances[0],
+    [adjustmentForm.stock_balance_id, balances, selectedAdjustmentBalance],
+  );
+
   const selectedTransfer = useMemo(
     () =>
       transfers.find((transfer) => transfer.id === selectedTransferId) ??
@@ -163,6 +178,28 @@ export function InventoryPage() {
     ).length;
     return { onHand, available, lowStock, pendingAdjustments };
   }, [adjustments, balances]);
+
+  const lowStockBalances = useMemo(
+    () =>
+      balances
+        .filter((item) => item.is_low_stock || item.available_quantity <= item.reorder_level)
+        .slice(0, 5),
+    [balances],
+  );
+
+  const serializedForSelectedItem = useMemo(() => {
+    if (!selectedStockBalance) return serializedUnits.slice(0, 6);
+    return serializedUnits
+      .filter((unit) => unit.variant_id === selectedStockBalance.variant_id)
+      .slice(0, 6);
+  }, [selectedStockBalance, serializedUnits]);
+
+  const selectedMovements = useMemo(() => {
+    if (!selectedStockBalance) return movements.slice(0, 8);
+    return movements
+      .filter((movement) => movement.variant_id === selectedStockBalance.variant_id)
+      .slice(0, 8);
+  }, [movements, selectedStockBalance]);
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -195,6 +232,7 @@ export function InventoryPage() {
     let active = true;
     Promise.allSettled([
       listInventoryBalances(token, selectedBranchId, query),
+      listSerializedUnits(token, selectedBranchId, query),
       listStockMovements(token, selectedBranchId),
       listAdjustmentRequests(token, selectedBranchId),
       listStockTransfers(token, selectedBranchId),
@@ -202,6 +240,7 @@ export function InventoryPage() {
     ]).then(
       ([
         balancesResult,
+        serializedUnitsResult,
         movementsResult,
         adjustmentsResult,
         transfersResult,
@@ -244,6 +283,12 @@ export function InventoryPage() {
                 ? current.stock_balance_id
                 : firstBalanceId,
           }));
+        } else {
+          failed = true;
+        }
+
+        if (serializedUnitsResult.status === "fulfilled") {
+          setSerializedUnits(serializedUnitsResult.value.items);
         } else {
           failed = true;
         }
@@ -329,6 +374,43 @@ export function InventoryPage() {
 
   function balanceLabel(balance: InventoryBalance) {
     return `${balance.sku} / ${balance.product_name} / ${balance.variant_name}`;
+  }
+
+  function balanceHealth(balance: InventoryBalance) {
+    if (balance.available_quantity <= 0) return "out";
+    if (balance.is_low_stock || balance.available_quantity <= balance.reorder_level) {
+      return "low";
+    }
+    return "healthy";
+  }
+
+  function balanceHealthTone(balance: InventoryBalance) {
+    return balanceHealth(balance) === "healthy" ? "success" : "danger";
+  }
+
+  function selectBalance(balance: InventoryBalance) {
+    setAdjustmentForm((current) => ({
+      ...current,
+      stock_balance_id: balance.stock_balance_id,
+    }));
+    setTransferForm((current) => ({
+      ...current,
+      stock_balance_id: balance.stock_balance_id,
+    }));
+    setCountForm((current) => ({
+      ...current,
+      stock_balance_id: balance.stock_balance_id,
+    }));
+  }
+
+  function signedQuantity(value: number) {
+    return `${value > 0 ? "+" : ""}${integer(value)}`;
+  }
+
+  function movementTone(movement: StockMovement) {
+    if (movement.quantity_delta > 0) return "success";
+    if (movement.quantity_delta < 0) return "warning";
+    return "neutral";
   }
 
   function requestChangeSummary(request: ApprovalRequest) {
@@ -475,6 +557,12 @@ export function InventoryPage() {
     }
     if (!quantity || quantity <= 0) {
       setNotice("Transfer quantity must be greater than zero.");
+      return;
+    }
+    if (quantity > selectedTransferBalance.available_quantity) {
+      setNotice(
+        `Only ${integer(selectedTransferBalance.available_quantity)} unit(s) are available to transfer.`,
+      );
       return;
     }
 
@@ -793,6 +881,119 @@ export function InventoryPage() {
         </article>
       </div>
 
+      <div className="inventory-desk m-t">
+        <section className="panel-card inventory-focus-card">
+          <header className="panel-card__header panel-card__header--compact">
+            <div>
+              <p className="eyebrow">Selected stock</p>
+              <h2>{selectedStockBalance?.sku ?? "No item selected"}</h2>
+            </div>
+            {selectedStockBalance && (
+              <StatusPill tone={balanceHealthTone(selectedStockBalance)}>
+                {titleize(balanceHealth(selectedStockBalance))}
+              </StatusPill>
+            )}
+          </header>
+
+          {selectedStockBalance ? (
+            <div className="inventory-focus-card__body">
+              <div>
+                <strong>
+                  {selectedStockBalance.product_name} /{" "}
+                  {selectedStockBalance.variant_name}
+                </strong>
+                <span>
+                  Reorder at {integer(selectedStockBalance.reorder_level)} ·{" "}
+                  {integer(selectedStockBalance.reserved_quantity)} reserved
+                </span>
+              </div>
+              <div className="inventory-mini-stats">
+                <span>
+                  <b>{integer(selectedStockBalance.quantity_on_hand)}</b>
+                  On hand
+                </span>
+                <span>
+                  <b>{integer(selectedStockBalance.available_quantity)}</b>
+                  Available
+                </span>
+                <span>
+                  <b>{integer(selectedMovements.length)}</b>
+                  Recent moves
+                </span>
+              </div>
+            </div>
+          ) : (
+            <p className="empty-panel-message">
+              Select a stock balance to see its controls, devices, and recent
+              movement history.
+            </p>
+          )}
+        </section>
+
+        <section className="panel-card">
+          <header className="panel-card__header panel-card__header--compact">
+            <div>
+              <p className="eyebrow">Attention</p>
+              <h2>Low-stock watchlist</h2>
+            </div>
+          </header>
+          <div className="inventory-watchlist">
+            {lowStockBalances.length ? (
+              lowStockBalances.map((balance) => (
+                <button
+                  key={balance.stock_balance_id}
+                  type="button"
+                  onClick={() => selectBalance(balance)}
+                >
+                  <strong>{balance.sku}</strong>
+                  <span>
+                    {integer(balance.available_quantity)} available · reorder{" "}
+                    {integer(balance.reorder_level)}
+                  </span>
+                </button>
+              ))
+            ) : (
+              <p className="empty-panel-message">
+                No low-stock items for this branch.
+              </p>
+            )}
+          </div>
+        </section>
+
+        <section className="panel-card">
+          <header className="panel-card__header panel-card__header--compact">
+            <div>
+              <p className="eyebrow">Serialized stock</p>
+              <h2>Trackable devices</h2>
+            </div>
+          </header>
+          <div className="serialized-unit-list">
+            {serializedForSelectedItem.length ? (
+              serializedForSelectedItem.map((unit) => (
+                <article key={unit.id}>
+                  <strong>{unit.serial_number ?? unit.imei ?? unit.sku}</strong>
+                  <span>
+                    {unit.product_name} / {unit.variant_name}
+                  </span>
+                  <div>
+                    <StatusPill tone={toneForStatus(unit.status)}>
+                      {titleize(unit.status)}
+                    </StatusPill>
+                    <small>
+                      {unit.imei ? `IMEI ${unit.imei}` : titleize(unit.condition)}
+                    </small>
+                  </div>
+                </article>
+              ))
+            ) : (
+              <p className="empty-panel-message">
+                No available serial or IMEI units match this stock item.
+              </p>
+            )}
+          </div>
+        </section>
+      </div>
+
       <div className="repair-workspace m-t">
         <section className="panel-card">
           <header className="panel-card__header">
@@ -804,6 +1005,15 @@ export function InventoryPage() {
 
           <form className="form-panel" onSubmit={handleRequestAdjustment}>
             <strong>Adjustment request</strong>
+            {selectedAdjustmentBalance && (
+              <div className="stock-action-context">
+                <span>{balanceLabel(selectedAdjustmentBalance)}</span>
+                <strong>
+                  {integer(selectedAdjustmentBalance.quantity_on_hand)} on hand ·{" "}
+                  {integer(selectedAdjustmentBalance.available_quantity)} available
+                </strong>
+              </div>
+            )}
             <div className="form-grid form-grid--two">
               <label>
                 Stock item
@@ -860,6 +1070,14 @@ export function InventoryPage() {
 
           <form className="form-panel form-panel--bordered" onSubmit={handleCreateTransfer}>
             <strong>Branch transfer</strong>
+            {selectedTransferBalance && (
+              <div className="stock-action-context">
+                <span>{balanceLabel(selectedTransferBalance)}</span>
+                <strong>
+                  {integer(selectedTransferBalance.available_quantity)} available to move
+                </strong>
+              </div>
+            )}
             <div className="form-grid form-grid--two">
               <label>
                 Stock item
@@ -905,6 +1123,7 @@ export function InventoryPage() {
                 <input
                   type="number"
                   min="1"
+                  max={selectedTransferBalance?.available_quantity}
                   value={transferForm.quantity}
                   onChange={(event) =>
                     setTransferForm((current) => ({
@@ -946,6 +1165,14 @@ export function InventoryPage() {
 
           <div className="ticket-action-panel">
             <form className="action-form" onSubmit={handleCreateStockCount}>
+              {selectedCountBalance && (
+                <div className="stock-action-context">
+                  <span>{balanceLabel(selectedCountBalance)}</span>
+                  <strong>
+                    Expected quantity: {integer(selectedCountBalance.quantity_on_hand)}
+                  </strong>
+                </div>
+              )}
               <label>
                 Count item
                 <select
@@ -1152,6 +1379,7 @@ export function InventoryPage() {
               <th>On hand</th>
               <th>Reserved</th>
               <th>Available</th>
+              <th>Reorder</th>
               <th>Status</th>
             </tr>
           </thead>
@@ -1164,20 +1392,7 @@ export function InventoryPage() {
                     ? "is-selected"
                     : ""
                 }
-                onClick={() => {
-                  setAdjustmentForm((current) => ({
-                    ...current,
-                    stock_balance_id: item.stock_balance_id,
-                  }));
-                  setTransferForm((current) => ({
-                    ...current,
-                    stock_balance_id: item.stock_balance_id,
-                  }));
-                  setCountForm((current) => ({
-                    ...current,
-                    stock_balance_id: item.stock_balance_id,
-                  }));
-                }}
+                onClick={() => selectBalance(item)}
               >
                 <td>{item.sku}</td>
                 <td>
@@ -1186,9 +1401,10 @@ export function InventoryPage() {
                 <td>{integer(item.quantity_on_hand)}</td>
                 <td>{integer(item.reserved_quantity)}</td>
                 <td>{integer(item.available_quantity)}</td>
+                <td>{integer(item.reorder_level)}</td>
                 <td>
-                  <StatusPill tone={item.is_low_stock ? "danger" : "success"}>
-                    {item.is_low_stock ? "Low stock" : "OK"}
+                  <StatusPill tone={balanceHealthTone(item)}>
+                    {titleize(balanceHealth(item))}
                   </StatusPill>
                 </td>
               </tr>
@@ -1357,19 +1573,30 @@ export function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {movements.map((movement) => (
-                <tr key={movement.id}>
-                  <td>{dateLabel(movement.created_at)}</td>
-                  <td>
-                    <StatusPill tone={toneForStatus(movement.movement_type)}>
-                      {titleize(movement.movement_type)}
-                    </StatusPill>
+              {selectedMovements.length ? (
+                selectedMovements.map((movement) => (
+                  <tr key={movement.id}>
+                    <td>{dateLabel(movement.created_at)}</td>
+                    <td>
+                      <StatusPill tone={movementTone(movement)}>
+                        {titleize(movement.movement_type)}
+                      </StatusPill>
+                    </td>
+                    <td>{signedQuantity(movement.quantity_delta)}</td>
+                    <td>{movement.unit_cost ? money(movement.unit_cost) : "-"}</td>
+                    <td>
+                      {titleize(movement.reference_type)}
+                      {movement.note ? <span>{movement.note}</span> : null}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={5} className="empty-table-cell">
+                    No movement history for the selected stock item yet.
                   </td>
-                  <td>{integer(movement.quantity_delta)}</td>
-                  <td>{movement.unit_cost ? money(movement.unit_cost) : "-"}</td>
-                  <td>{titleize(movement.reference_type)}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </section>
