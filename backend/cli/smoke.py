@@ -23,8 +23,8 @@ def build_parser() -> argparse.ArgumentParser:
         description="Run a read-only smoke check against the configured backend DB."
     )
     parser.add_argument("--password", default=DEMO_PASSWORD)
-    parser.add_argument("--admin-username", default="demo_admin")
-    parser.add_argument("--cashier-username", default="demo_cashier")
+    parser.add_argument("--admin-username", default="admin1")
+    parser.add_argument("--cashier-username", default="cashier1")
     return parser
 
 
@@ -36,7 +36,7 @@ def _token(client: TestClient, username: str, password: str) -> str:
     if response.status_code != 200:
         raise RuntimeError(
             f"login failed for {username!r}; run `python -m backend.cli.seed_demo` "
-            "or check the demo password"
+            "or check the seeded password"
         )
     return response.json()["access_token"]
 
