@@ -12,6 +12,7 @@ import type {
   Customer,
   CustomerCreatePayload,
   DashboardSummary,
+  ExpenseSummary,
   GoodsReceipt,
   GoodsReceiptPayload,
   InventoryBalance,
@@ -325,18 +326,48 @@ export function dashboardSummary(token: string) {
   return apiRequest<DashboardSummary>("/reports/dashboard", { token });
 }
 
-export function inventorySummary(token: string) {
+type ReportQueryOptions = {
+  branchId?: string;
+  startAt?: string | null;
+  endAt?: string | null;
+  topLimit?: number;
+};
+
+function reportQuery(options: ReportQueryOptions = {}) {
+  return {
+    branch_id: options.branchId,
+    start_at: options.startAt,
+    end_at: options.endAt,
+    top_limit: options.topLimit,
+  };
+}
+
+export function inventorySummary(token: string, options: ReportQueryOptions = {}) {
   return apiRequest<DashboardSummary["inventory"]>("/reports/inventory", {
     token,
+    query: { branch_id: options.branchId },
   });
 }
 
-export function repairSummary(token: string) {
-  return apiRequest<DashboardSummary["repairs"]>("/reports/repairs", { token });
+export function repairSummary(token: string, options: ReportQueryOptions = {}) {
+  return apiRequest<DashboardSummary["repairs"]>("/reports/repairs", {
+    token,
+    query: reportQuery(options),
+  });
 }
 
-export function salesSummary(token: string) {
-  return apiRequest<DashboardSummary["sales"]>("/reports/sales", { token });
+export function salesSummary(token: string, options: ReportQueryOptions = {}) {
+  return apiRequest<DashboardSummary["sales"]>("/reports/sales", {
+    token,
+    query: reportQuery(options),
+  });
+}
+
+export function expenseSummary(token: string, options: ReportQueryOptions = {}) {
+  return apiRequest<ExpenseSummary>("/reports/expenses", {
+    token,
+    query: reportQuery(options),
+  });
 }
 
 export function listInventoryBalances(

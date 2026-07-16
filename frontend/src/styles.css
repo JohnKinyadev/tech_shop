@@ -1115,6 +1115,131 @@ button:disabled {
   outline-offset: -2px;
 }
 
+.reports-page {
+  padding-bottom: 24px;
+}
+
+.report-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(160px, 0.45fr)) auto;
+  gap: 12px;
+  align-items: end;
+  padding: 12px;
+}
+
+.report-filter-bar label {
+  display: grid;
+  gap: 5px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.report-filter-bar input,
+.report-filter-bar select {
+  height: 36px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+
+.report-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.report-insight-card {
+  display: grid;
+  gap: 10px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.report-insight-card div,
+.report-notes-list article,
+.report-payment-list article,
+.report-status-list article {
+  display: grid;
+  gap: 5px;
+}
+
+.report-insight-card span,
+.report-payment-list span,
+.report-status-list span,
+.report-notes-list span,
+.report-table td span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.report-insight-card strong {
+  font-size: 20px;
+}
+
+.report-payment-list,
+.report-status-list,
+.report-notes-list {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.report-payment-list article,
+.report-status-list article,
+.report-notes-list article {
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.report-payment-list article {
+  grid-template-columns: minmax(0, 1fr) auto;
+  align-items: center;
+}
+
+.report-payment-list .report-bar,
+.report-status-list .report-bar {
+  grid-column: 1 / -1;
+}
+
+.report-bar {
+  height: 8px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #e8eef5;
+}
+
+.report-bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: linear-gradient(90deg, var(--primary), #17a78b);
+}
+
+.report-status-list article {
+  grid-template-columns: minmax(0, 160px) minmax(0, 1fr);
+  align-items: center;
+}
+
+.report-status-list .report-bar {
+  grid-column: auto;
+}
+
+.report-notes-list {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.report-notes-list strong {
+  font-size: 18px;
+}
+
 .inventory-desk {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.65fr) minmax(320px, 0.8fr);
