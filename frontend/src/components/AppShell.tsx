@@ -2,6 +2,7 @@ import type { ReactNode } from "react";
 
 import { BrandMark } from "./BrandMark";
 import { StatusPill } from "./StatusPill";
+import type { CurrentUser } from "../api/types";
 import { useAuth } from "../state/auth";
 
 export type AppView =
@@ -22,28 +23,123 @@ type AppShellProps = {
   children: ReactNode;
 };
 
-const navItems: Array<{ key: AppView; label: string }> = [
+type NavItem = {
+  key: AppView;
+  label: string;
+  roles?: string[];
+  permissions?: string[];
+};
+
+const navItems: NavItem[] = [
   { key: "dashboard", label: "Dashboard" },
-  { key: "pos", label: "Sales / POS" },
-  { key: "catalog", label: "Catalog" },
-  { key: "inventory", label: "Inventory" },
-  { key: "repairs", label: "Repairs" },
-  { key: "purchases", label: "Purchases" },
-  { key: "expenses", label: "Expenses" },
-  { key: "reports", label: "Reports" },
-  { key: "roles", label: "Staff & Roles" },
-  { key: "settings", label: "Settings" },
+  {
+    key: "pos",
+    label: "Sales / POS",
+    roles: ["admin", "owner", "branch_manager", "cashier"],
+    permissions: ["sales.process", "tills.own.view", "tills.manage"],
+  },
+  {
+    key: "catalog",
+    label: "Catalog",
+    roles: ["admin", "owner", "branch_manager", "inventory_manager", "cashier"],
+    permissions: ["catalog.view", "catalog.manage"],
+  },
+  {
+    key: "inventory",
+    label: "Inventory",
+    roles: ["admin", "owner", "branch_manager", "inventory_manager", "cashier"],
+    permissions: ["inventory.view", "inventory.adjust", "inventory.transfer", "reports.inventory.view"],
+  },
+  {
+    key: "repairs",
+    label: "Repairs",
+    roles: ["admin", "owner", "branch_manager", "technician"],
+    permissions: [
+      "repairs.view",
+      "repairs.assign",
+      "repairs.update",
+      "repairs.close",
+      "reports.own_repairs.view",
+      "reports.repairs.view",
+    ],
+  },
+  {
+    key: "purchases",
+    label: "Purchases",
+    roles: ["admin", "owner", "branch_manager", "inventory_manager"],
+    permissions: ["purchases.create", "purchases.approve", "purchases.receive"],
+  },
+  {
+    key: "expenses",
+    label: "Expenses",
+    roles: ["admin", "owner", "branch_manager", "accountant"],
+    permissions: ["expenses.view", "expenses.manage"],
+  },
+  {
+    key: "reports",
+    label: "Reports",
+    roles: ["admin", "owner", "branch_manager", "inventory_manager", "accountant"],
+    permissions: [
+      "reports.sales.view",
+      "reports.inventory.view",
+      "reports.repairs.view",
+      "reports.own_repairs.view",
+      "expenses.view",
+    ],
+  },
+  {
+    key: "roles",
+    label: "Staff & Roles",
+    roles: ["admin", "owner", "branch_manager"],
+    permissions: ["staff.manage", "roles.manage"],
+  },
+  {
+    key: "settings",
+    label: "Settings",
+    roles: ["admin", "owner", "branch_manager"],
+    permissions: ["branches.manage", "tills.manage"],
+  },
 ];
+
+function roleCode(user: CurrentUser) {
+  return user.role_code.toLowerCase();
+}
+
+function hasGlobalAccess(user: CurrentUser) {
+  return ["admin", "owner"].includes(roleCode(user)) || user.permissions.includes("*");
+}
+
+function hasAnyPermission(user: CurrentUser, permissions: string[] = []) {
+  if (hasGlobalAccess(user)) return true;
+  return permissions.some((permission) => user.permissions.includes(permission));
+}
+
+export function canAccessView(user: CurrentUser | null, view: AppView) {
+  if (!user) return false;
+  if (view === "dashboard") return true;
+  if (hasGlobalAccess(user)) return true;
+
+  const item = navItems.find((navItem) => navItem.key === view);
+  if (!item) return false;
+
+  return Boolean(item.roles?.includes(roleCode(user)) || hasAnyPermission(user, item.permissions));
+}
+
+export function firstAccessibleView(user: CurrentUser | null): AppView {
+  return navItems.find((item) => canAccessView(user, item.key))?.key ?? "dashboard";
+}
 
 export function AppShell({ activeView, onViewChange, children }: AppShellProps) {
   const { user, signOut, isPreview } = useAuth();
+  const visibleNavItems = navItems.filter((item) => canAccessView(user, item.key));
+  const branchScope = user && !hasGlobalAccess(user) ? "Assigned branch" : "All branches";
 
   return (
     <div className="erp-app">
       <header className="erp-topbar">
         <div className="erp-topbar__brand">
           <BrandMark />
-          <span className="branch-chip">Main Branch</span>
+          <span className="branch-chip">{branchScope}</span>
         </div>
 
         <div className="erp-topbar__actions">
@@ -59,7 +155,7 @@ export function AppShell({ activeView, onViewChange, children }: AppShellProps) 
       </header>
 
       <nav className="module-nav" aria-label="Main modules">
-        {navItems.map((item) => (
+        {visibleNavItems.map((item) => (
           <button
             key={item.key}
             className={activeView === item.key ? "is-active" : ""}

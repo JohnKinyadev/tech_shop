@@ -1,6 +1,6 @@
-import { useState } from "react";
+import { useEffect, useState } from "react";
 
-import { AppShell, type AppView } from "./components/AppShell";
+import { AppShell, canAccessView, firstAccessibleView, type AppView } from "./components/AppShell";
 import { CatalogPage } from "./pages/CatalogPage";
 import { DashboardPage } from "./pages/DashboardPage";
 import { ExpensesPage } from "./pages/ExpensesPage";
@@ -17,28 +17,35 @@ import { useAuth } from "./state/auth";
 export function App() {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState<AppView>("dashboard");
+  const safeView = user && canAccessView(user, activeView) ? activeView : firstAccessibleView(user);
+
+  useEffect(() => {
+    if (user && activeView !== safeView) {
+      setActiveView(safeView);
+    }
+  }, [activeView, safeView, user]);
 
   if (!user) {
     return <LoginPage />;
   }
 
-  function renderView() {
-    if (activeView === "dashboard") return <DashboardPage onNavigate={setActiveView} />;
-    if (activeView === "pos") return <PosPage />;
-    if (activeView === "catalog") return <CatalogPage />;
-    if (activeView === "inventory") return <InventoryPage />;
-    if (activeView === "repairs") return <RepairsPage />;
-    if (activeView === "purchases") return <PurchasesPage />;
-    if (activeView === "expenses") return <ExpensesPage />;
-    if (activeView === "reports") return <ReportsPage />;
-    if (activeView === "roles") return <RoleStudioPage />;
-    if (activeView === "settings") return <SettingsPage />;
+  function renderView(view: AppView) {
+    if (view === "dashboard") return <DashboardPage onNavigate={setActiveView} />;
+    if (view === "pos") return <PosPage />;
+    if (view === "catalog") return <CatalogPage />;
+    if (view === "inventory") return <InventoryPage />;
+    if (view === "repairs") return <RepairsPage />;
+    if (view === "purchases") return <PurchasesPage />;
+    if (view === "expenses") return <ExpensesPage />;
+    if (view === "reports") return <ReportsPage />;
+    if (view === "roles") return <RoleStudioPage />;
+    if (view === "settings") return <SettingsPage />;
     return <DashboardPage onNavigate={setActiveView} />;
   }
 
   return (
-    <AppShell activeView={activeView} onViewChange={setActiveView}>
-      {renderView()}
+    <AppShell activeView={safeView} onViewChange={setActiveView}>
+      {renderView(safeView)}
     </AppShell>
   );
 }
