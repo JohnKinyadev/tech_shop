@@ -1,18 +1,31 @@
+import re
 from typing import Any
 from uuid import UUID
 
-from sqlalchemy import func, or_, select
+from sqlalchemy import delete, func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.core.permissions import ADMIN, ASSIGNABLE_ROLES
 from backend.core.security import hash_password
 from backend.models.branch import Branch
-from backend.models.roles import Role
+from backend.models.permissions import Permission
+from backend.models.roles import Role, RolePermission
 from backend.models.users import User
-from backend.schemas.user_schemas import UserCreate, UserUpdate
+from backend.schemas.user_schemas import (
+    PermissionResponse,
+    RoleCreate,
+    RoleResponse,
+    RoleUpdate,
+    UserCreate,
+    UserUpdate,
+)
 from backend.services.audit import record_audit
 from backend.services.auth import AuthPrincipal
-from backend.services.authorization import enforce_permission, enforce_role_assignment
+from backend.services.authorization import (
+    AuthorizationError,
+    enforce_permission,
+    enforce_role_assignment,
+)
 from backend.services.exceptions import ConflictError, NotFoundError, ValidationError
 
 
@@ -42,6 +55,82 @@ def _get_role(db: Session, role_id: UUID) -> Role:
     if role is None:
         raise NotFoundError("role not found")
     return role
+
+
+def _ensure_admin_role_management(principal: AuthPrincipal) -> None:
+    if principal.role_code != ADMIN:
+        raise AuthorizationError("only Admins can manage roles and permissions")
+
+
+def _normalize_role_code(code: str) -> str:
+    normalized = re.sub(r"[^a-z0-9_]+", "_", code.strip().lower())
+    normalized = re.sub(r"_+", "_", normalized).strip("_")
+    if len(normalized) < 2:
+        raise ValidationError("role code must contain at least two letters or numbers")
+    return normalized
+
+
+def _ensure_unique_role_identity(
+    db: Session,
+    *,
+    code: str | None = None,
+    name: str | None = None,
+    exclude_id: UUID | None = None,
+) -> None:
+    conditions = []
+    if code is not None:
+        conditions.append(func.lower(Role.code) == code.strip().lower())
+    if name is not None:
+        conditions.append(func.lower(Role.name) == name.strip().lower())
+    if not conditions:
+        return
+    statement = select(Role.id).where(or_(*conditions), Role.is_deleted.is_(False))
+    if exclude_id is not None:
+        statement = statement.where(Role.id != exclude_id)
+    if db.scalar(statement.limit(1)) is not None:
+        raise ConflictError("role code or name is already in use")
+
+
+def _permissions_by_id(db: Session, permission_ids: list[UUID]) -> dict[UUID, Permission]:
+    unique_ids = set(permission_ids)
+    if not unique_ids:
+        return {}
+    permissions = {
+        permission.id: permission
+        for permission in db.scalars(
+            select(Permission).where(
+                Permission.id.in_(unique_ids),
+                Permission.is_deleted.is_(False),
+            )
+        ).all()
+    }
+    if len(permissions) != len(unique_ids):
+        raise NotFoundError("one or more permissions were not found")
+    return permissions
+
+
+def _role_permissions(db: Session, role_id: UUID) -> list[Permission]:
+    return list(
+        db.scalars(
+            select(Permission)
+            .join(RolePermission, RolePermission.permission_id == Permission.id)
+            .where(
+                RolePermission.role_id == role_id,
+                Permission.is_deleted.is_(False),
+            )
+            .order_by(Permission.resource, Permission.action)
+        ).all()
+    )
+
+
+def _role_response(db: Session, role: Role) -> RoleResponse:
+    permissions = [
+        PermissionResponse.model_validate(permission)
+        for permission in _role_permissions(db, role.id)
+    ]
+    return RoleResponse.model_validate(role).model_copy(
+        update={"permissions": permissions}
+    )
 
 
 def _ensure_branch_exists(db: Session, branch_id: UUID) -> None:
@@ -83,6 +172,14 @@ def _enforce_manageable_user(db: Session, principal: AuthPrincipal, user: User) 
 
 def list_assignable_roles(db: Session, principal: AuthPrincipal) -> list[Role]:
     enforce_permission(principal, "staff.manage")
+    if principal.role_code == ADMIN:
+        return list(
+            db.scalars(
+                select(Role)
+                .where(Role.is_active.is_(True), Role.is_deleted.is_(False))
+                .order_by(Role.name)
+            ).all()
+        )
     allowed_codes = ASSIGNABLE_ROLES.get(principal.role_code, frozenset())
     return list(
         db.scalars(
@@ -95,6 +192,140 @@ def list_assignable_roles(db: Session, principal: AuthPrincipal) -> list[Role]:
             .order_by(Role.name)
         ).all()
     )
+
+
+def list_permissions(db: Session, principal: AuthPrincipal) -> list[Permission]:
+    enforce_permission(principal, "staff.manage")
+    _ensure_admin_role_management(principal)
+    return list(
+        db.scalars(
+            select(Permission)
+            .where(Permission.is_deleted.is_(False))
+            .order_by(Permission.resource, Permission.action)
+        ).all()
+    )
+
+
+def list_roles(db: Session, principal: AuthPrincipal) -> list[RoleResponse]:
+    enforce_permission(principal, "staff.manage")
+    _ensure_admin_role_management(principal)
+    roles = db.scalars(
+        select(Role).where(Role.is_deleted.is_(False)).order_by(Role.name)
+    ).all()
+    return [_role_response(db, role) for role in roles]
+
+
+def create_role(
+    db: Session, principal: AuthPrincipal, payload: RoleCreate
+) -> RoleResponse:
+    enforce_permission(principal, "staff.manage")
+    _ensure_admin_role_management(principal)
+    code = _normalize_role_code(payload.code)
+    name = payload.name.strip()
+    _ensure_unique_role_identity(db, code=code, name=name)
+    permissions = _permissions_by_id(db, payload.permission_ids)
+
+    role = Role(
+        code=code,
+        name=name,
+        description=payload.description,
+        is_system=False,
+        is_active=True,
+    )
+    db.add(role)
+    db.flush()
+    for permission_id in permissions:
+        db.add(RolePermission(role_id=role.id, permission_id=permission_id))
+    db.flush()
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=principal.branch_id,
+        action="role.created",
+        resource_type="role",
+        resource_id=role.id,
+        after={
+            "code": role.code,
+            "name": role.name,
+            "permission_ids": [str(item) for item in permissions],
+        },
+    )
+    return _role_response(db, role)
+
+
+def update_role(
+    db: Session,
+    principal: AuthPrincipal,
+    role_id: UUID,
+    payload: RoleUpdate,
+) -> RoleResponse:
+    enforce_permission(principal, "staff.manage")
+    _ensure_admin_role_management(principal)
+    if not payload.model_fields_set:
+        raise ValidationError("at least one field is required")
+
+    role = db.scalar(select(Role).where(Role.id == role_id, Role.is_deleted.is_(False)))
+    if role is None:
+        raise NotFoundError("role not found")
+    if role.is_system:
+        raise ConflictError("system roles cannot be edited")
+
+    if payload.name is not None:
+        _ensure_unique_role_identity(
+            db,
+            name=payload.name.strip(),
+            exclude_id=role.id,
+        )
+
+    if payload.is_active is False and role.is_active:
+        active_users = db.scalar(
+            select(func.count()).select_from(User).where(
+                User.role_id == role.id,
+                User.is_active.is_(True),
+                User.is_deleted.is_(False),
+            )
+        )
+        if active_users:
+            raise ConflictError("roles assigned to active users cannot be deactivated")
+
+    before = {
+        "name": role.name,
+        "description": role.description,
+        "is_active": role.is_active,
+        "permission_ids": [
+            str(permission.id) for permission in _role_permissions(db, role.id)
+        ],
+    }
+    if payload.name is not None:
+        role.name = payload.name.strip()
+    if "description" in payload.model_fields_set:
+        role.description = payload.description
+    if payload.is_active is not None:
+        role.is_active = payload.is_active
+    if payload.permission_ids is not None:
+        permissions = _permissions_by_id(db, payload.permission_ids)
+        db.execute(delete(RolePermission).where(RolePermission.role_id == role.id))
+        for permission_id in permissions:
+            db.add(RolePermission(role_id=role.id, permission_id=permission_id))
+    db.flush()
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=principal.branch_id,
+        action="role.updated",
+        resource_type="role",
+        resource_id=role.id,
+        before=before,
+        after={
+            "name": role.name,
+            "description": role.description,
+            "is_active": role.is_active,
+            "permission_ids": [
+                str(permission.id) for permission in _role_permissions(db, role.id)
+            ],
+        },
+    )
+    return _role_response(db, role)
 
 
 def list_staff(db: Session, principal: AuthPrincipal) -> list[User]:

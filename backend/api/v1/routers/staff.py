@@ -6,6 +6,10 @@ from fastapi import APIRouter, Depends, status
 from backend.api.dependencies import DatabaseSession, require_permission
 from backend.schemas.user_schemas import (
     AssignableRoleResponse,
+    PermissionResponse,
+    RoleCreate,
+    RoleResponse,
+    RoleUpdate,
     UserCreate,
     UserResponse,
     UserUpdate,
@@ -27,6 +31,46 @@ def list_assignable_roles(
         AssignableRoleResponse.model_validate(role)
         for role in staff_service.list_assignable_roles(db, principal)
     ]
+
+
+@router.get("/permissions", response_model=list[PermissionResponse])
+def list_permissions(
+    principal: ManageStaffPrincipal, db: DatabaseSession
+) -> list[PermissionResponse]:
+    return [
+        PermissionResponse.model_validate(permission)
+        for permission in staff_service.list_permissions(db, principal)
+    ]
+
+
+@router.get("/roles/manage", response_model=list[RoleResponse])
+def list_roles(
+    principal: ManageStaffPrincipal, db: DatabaseSession
+) -> list[RoleResponse]:
+    return staff_service.list_roles(db, principal)
+
+
+@router.post("/roles", response_model=RoleResponse, status_code=status.HTTP_201_CREATED)
+def create_role(
+    payload: RoleCreate,
+    principal: ManageStaffPrincipal,
+    db: DatabaseSession,
+) -> RoleResponse:
+    role = staff_service.create_role(db, principal, payload)
+    db.commit()
+    return role
+
+
+@router.patch("/roles/{role_id}", response_model=RoleResponse)
+def update_role(
+    role_id: UUID,
+    payload: RoleUpdate,
+    principal: ManageStaffPrincipal,
+    db: DatabaseSession,
+) -> RoleResponse:
+    role = staff_service.update_role(db, principal, role_id, payload)
+    db.commit()
+    return role
 
 
 @router.get("/users", response_model=list[UserResponse])

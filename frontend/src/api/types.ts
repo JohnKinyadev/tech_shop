@@ -633,6 +633,36 @@ export type StaffUserUpdatePayload = {
   is_verified?: boolean;
 };
 
+export type Permission = ModelResponse & {
+  code: string;
+  resource: string;
+  action: string;
+  description: string | null;
+};
+
+export type Role = ModelResponse & {
+  code: string;
+  name: string;
+  description: string | null;
+  is_system: boolean;
+  is_active: boolean;
+  permissions: Permission[];
+};
+
+export type RoleCreatePayload = {
+  code: string;
+  name: string;
+  description?: string | null;
+  permission_ids: UUID[];
+};
+
+export type RoleUpdatePayload = {
+  name?: string;
+  description?: string | null;
+  permission_ids?: UUID[];
+  is_active?: boolean;
+};
+
 export type AssignableRole = {
   id: UUID;
   code: string;

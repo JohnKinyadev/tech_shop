@@ -1,26 +1,108 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
+  createRole,
   createStaffUser,
   listAssignableRoles,
   listBranches,
+  listManagedRoles,
+  listPermissions,
   listStaffUsers,
+  updateRole,
   updateStaffUser,
 } from "../api/client";
-import type { AssignableRole, Branch, StaffUser } from "../api/types";
+import type {
+  AssignableRole,
+  Branch,
+  Permission,
+  Role,
+  StaffUser,
+} from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import { demoBranches, demoRoles, demoStaffUsers } from "../data/demoManagement";
 import { useAuth } from "../state/auth";
 import { dateLabel, integer, titleize, toneForStatus } from "../utils/format";
 
-const permissionGroups = [
-  ["Catalog", "View products", "Create products", "Edit pricing"],
-  ["Inventory", "View stock", "Adjust stock", "Transfer stock"],
-  ["POS / Sales", "Process sale", "Void sale", "Approve refund"],
-  ["Repairs", "Assign ticket", "Update ticket", "Close ticket"],
-  ["Reports", "Sales reports", "Inventory reports", "Repair reports"],
-  ["Staff", "Create staff", "Edit staff", "Assign role"],
-];
+const permissionCatalog = [
+  ["branches.manage", "Create and configure branches"],
+  ["catalog.view", "View the product catalog"],
+  ["catalog.manage", "Create products, variants, categories, brands, and prices"],
+  ["inventory.view", "View branch inventory levels"],
+  ["inventory.adjust", "Request or perform stock adjustments"],
+  ["inventory.transfer", "Initiate and process stock transfers"],
+  ["purchases.create", "Create purchase orders"],
+  ["purchases.approve", "Approve purchase orders"],
+  ["purchases.receive", "Receive stock against purchase orders"],
+  ["sales.process", "Process point-of-sale transactions"],
+  ["sales.void", "Approve or perform sale voids"],
+  ["returns.approve", "Approve returns and refunds"],
+  ["tills.manage", "Create and configure branch tills"],
+  ["tills.own.view", "View the signed-in cashier's till session"],
+  ["repairs.view", "View repair tickets within the permitted scope"],
+  ["repairs.assign", "Assign repair tickets to technicians"],
+  ["repairs.update", "Update repair status and parts usage"],
+  ["repairs.close", "Close repair tickets and generate invoices"],
+  ["orders.fulfill", "Fulfill or cancel online orders"],
+  ["reports.sales.view", "View sales reports"],
+  ["reports.inventory.view", "View inventory and purchasing reports"],
+  ["reports.repairs.view", "View repair reports"],
+  ["reports.own_repairs.view", "View reports for assigned repair tickets"],
+  ["expenses.view", "View expense records"],
+  ["expenses.manage", "Create and approve expense records"],
+  ["staff.manage", "Create and edit staff accounts within role scope"],
+] as const;
+
+const demoPermissionCodesByRole: Record<string, string[]> = {
+  admin: permissionCatalog.map(([code]) => code),
+  branch_manager: [
+    "catalog.view",
+    "inventory.view",
+    "inventory.adjust",
+    "inventory.transfer",
+    "purchases.create",
+    "purchases.approve",
+    "purchases.receive",
+    "sales.process",
+    "sales.void",
+    "returns.approve",
+    "tills.manage",
+    "repairs.view",
+    "repairs.assign",
+    "repairs.update",
+    "repairs.close",
+    "orders.fulfill",
+    "reports.sales.view",
+    "reports.inventory.view",
+    "reports.repairs.view",
+    "expenses.view",
+    "expenses.manage",
+    "staff.manage",
+  ],
+  inventory_manager: [
+    "catalog.view",
+    "inventory.view",
+    "inventory.adjust",
+    "inventory.transfer",
+    "purchases.create",
+    "purchases.approve",
+    "purchases.receive",
+    "orders.fulfill",
+    "reports.inventory.view",
+  ],
+  technician: [
+    "repairs.view",
+    "repairs.update",
+    "repairs.close",
+    "reports.own_repairs.view",
+  ],
+  cashier: ["catalog.view", "inventory.view", "sales.process", "tills.own.view"],
+  accountant: [
+    "reports.sales.view",
+    "reports.inventory.view",
+    "reports.repairs.view",
+    "expenses.view",
+  ],
+};
 
 const emptyCreateForm = {
   full_name: "",
@@ -42,6 +124,14 @@ const emptyEditForm = {
   is_verified: true,
 };
 
+const emptyRoleForm = {
+  code: "",
+  name: "",
+  description: "",
+  permission_ids: [] as string[],
+  is_active: true,
+};
+
 function usernameFromName(name: string) {
   return name
     .trim()
@@ -51,25 +141,78 @@ function usernameFromName(name: string) {
     .slice(0, 80);
 }
 
+function roleCodeFromName(name: string) {
+  return usernameFromName(name).slice(0, 50);
+}
+
+function fallbackPermissions(): Permission[] {
+  const now = new Date().toISOString();
+  return permissionCatalog.map(([code, description]) => {
+    const [resource, action] = code.split(/\.(?=[^.]+$)/);
+    return {
+      id: `demo-permission-${code}`,
+      created_at: now,
+      updated_at: now,
+      is_deleted: false,
+      code,
+      resource,
+      action,
+      description,
+    };
+  });
+}
+
+function demoManagedRoles(permissions: Permission[]): Role[] {
+  const now = new Date().toISOString();
+  const permissionByCode = new Map(permissions.map((permission) => [permission.code, permission]));
+  return demoRoles.map((role) => ({
+    id: role.id,
+    created_at: now,
+    updated_at: now,
+    is_deleted: false,
+    code: role.code,
+    name: role.name,
+    description: role.description,
+    is_system: true,
+    is_active: true,
+    permissions: (demoPermissionCodesByRole[role.code] ?? [])
+      .map((code) => permissionByCode.get(code))
+      .filter((permission): permission is Permission => Boolean(permission)),
+  }));
+}
+
 export function RoleStudioPage() {
-  const { token, isPreview } = useAuth();
-  const [roles, setRoles] = useState<AssignableRole[]>(demoRoles);
+  const { token, isPreview, user } = useAuth();
+  const previewPermissions = useMemo(() => fallbackPermissions(), []);
+  const [assignableRoles, setAssignableRoles] = useState<AssignableRole[]>(demoRoles);
+  const [managedRoles, setManagedRoles] = useState<Role[]>(() =>
+    demoManagedRoles(previewPermissions),
+  );
+  const [permissions, setPermissions] = useState<Permission[]>(previewPermissions);
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
   const [users, setUsers] = useState<StaffUser[]>(demoStaffUsers);
   const [selectedUserId, setSelectedUserId] = useState(demoStaffUsers[0]?.id ?? "");
+  const [selectedRoleId, setSelectedRoleId] = useState(demoRoles[0]?.id ?? "");
   const [createForm, setCreateForm] = useState(emptyCreateForm);
   const [editForm, setEditForm] = useState(emptyEditForm);
+  const [roleForm, setRoleForm] = useState(emptyRoleForm);
+  const [userSearch, setUserSearch] = useState("");
+  const [roleSearch, setRoleSearch] = useState("");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
   const roleNameById = useMemo(
-    () => new Map(roles.map((role) => [role.id, role.name])),
-    [roles],
+    () =>
+      new Map([
+        ...assignableRoles.map((role) => [role.id, role.name] as const),
+        ...managedRoles.map((role) => [role.id, role.name] as const),
+      ]),
+    [assignableRoles, managedRoles],
   );
 
   const roleById = useMemo(
-    () => new Map(roles.map((role) => [role.id, role])),
-    [roles],
+    () => new Map(managedRoles.map((role) => [role.id, role])),
+    [managedRoles],
   );
 
   const branchNameById = useMemo(
@@ -77,19 +220,78 @@ export function RoleStudioPage() {
     [branches],
   );
 
+  const permissionById = useMemo(
+    () => new Map(permissions.map((permission) => [permission.id, permission])),
+    [permissions],
+  );
+
+  const permissionGroups = useMemo(() => {
+    const groups = new Map<string, Permission[]>();
+    permissions.forEach((permission) => {
+      const current = groups.get(permission.resource) ?? [];
+      current.push(permission);
+      groups.set(permission.resource, current);
+    });
+    return [...groups.entries()].sort(([left], [right]) => left.localeCompare(right));
+  }, [permissions]);
+
   const selectedUser = useMemo(
-    () => users.find((user) => user.id === selectedUserId) ?? users[0],
+    () => users.find((item) => item.id === selectedUserId) ?? users[0],
     [selectedUserId, users],
+  );
+
+  const selectedRole = useMemo(
+    () => managedRoles.find((role) => role.id === selectedRoleId),
+    [managedRoles, selectedRoleId],
+  );
+
+  const filteredUsers = useMemo(() => {
+    const needle = userSearch.trim().toLowerCase();
+    if (!needle) return users;
+    return users.filter((staff) =>
+      [
+        staff.full_name,
+        staff.username,
+        staff.email,
+        roleNameById.get(staff.role_id),
+        branchLabel(staff.branch_id),
+      ]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [roleNameById, userSearch, users, branches]);
+
+  const filteredRoles = useMemo(() => {
+    const needle = roleSearch.trim().toLowerCase();
+    if (!needle) return managedRoles;
+    return managedRoles.filter((role) =>
+      [role.code, role.name, role.description]
+        .filter(Boolean)
+        .join(" ")
+        .toLowerCase()
+        .includes(needle),
+    );
+  }, [managedRoles, roleSearch]);
+
+  const selectedRolePermissionCodes = useMemo(
+    () =>
+      roleForm.permission_ids
+        .map((permissionId) => permissionById.get(permissionId)?.code)
+        .filter((code): code is string => Boolean(code)),
+    [permissionById, roleForm.permission_ids],
   );
 
   const stats = useMemo(
     () => ({
       users: users.length,
-      active: users.filter((user) => user.is_active).length,
-      pendingPassword: users.filter((user) => user.must_change_password).length,
-      roles: roles.length,
+      active: users.filter((staff) => staff.is_active).length,
+      pendingPassword: users.filter((staff) => staff.must_change_password).length,
+      roles: managedRoles.length,
+      customRoles: managedRoles.filter((role) => !role.is_system).length,
     }),
-    [roles.length, users],
+    [managedRoles, users],
   );
 
   useEffect(() => {
@@ -98,45 +300,62 @@ export function RoleStudioPage() {
     let active = true;
     Promise.allSettled([
       listAssignableRoles(token),
+      listManagedRoles(token),
+      listPermissions(token),
       listStaffUsers(token),
       listBranches(token),
-    ]).then(([rolesResult, usersResult, branchesResult]) => {
-      if (!active) return;
-      let failed = false;
+    ]).then(
+      ([assignableResult, managedResult, permissionsResult, usersResult, branchesResult]) => {
+        if (!active) return;
+        let failed = false;
 
-      if (rolesResult.status === "fulfilled") {
-        setRoles(rolesResult.value);
-        setCreateForm((current) => ({
-          ...current,
-          role_id: current.role_id || rolesResult.value[0]?.id || "",
-        }));
-      } else {
-        failed = true;
-      }
+        if (assignableResult.status === "fulfilled") {
+          setAssignableRoles(assignableResult.value);
+          setCreateForm((current) => ({
+            ...current,
+            role_id: current.role_id || assignableResult.value[0]?.id || "",
+          }));
+        } else {
+          failed = true;
+        }
 
-      if (usersResult.status === "fulfilled") {
-        setUsers(usersResult.value);
-        setSelectedUserId((current) => current || usersResult.value[0]?.id || "");
-      } else {
-        failed = true;
-      }
+        if (managedResult.status === "fulfilled") {
+          setManagedRoles(managedResult.value);
+          setSelectedRoleId((current) => current || managedResult.value[0]?.id || "");
+        } else {
+          failed = true;
+        }
 
-      if (branchesResult.status === "fulfilled") {
-        setBranches(branchesResult.value);
-        setCreateForm((current) => ({
-          ...current,
-          branch_id: current.branch_id || branchesResult.value[0]?.id || "",
-        }));
-      } else {
-        failed = true;
-      }
+        if (permissionsResult.status === "fulfilled") {
+          setPermissions(permissionsResult.value);
+        } else {
+          failed = true;
+        }
 
-      setNotice(
-        failed
-          ? "Staff API unavailable or not permitted. Sample data remains visible where needed."
-          : null,
-      );
-    });
+        if (usersResult.status === "fulfilled") {
+          setUsers(usersResult.value);
+          setSelectedUserId((current) => current || usersResult.value[0]?.id || "");
+        } else {
+          failed = true;
+        }
+
+        if (branchesResult.status === "fulfilled") {
+          setBranches(branchesResult.value);
+          setCreateForm((current) => ({
+            ...current,
+            branch_id: current.branch_id || branchesResult.value[0]?.id || "",
+          }));
+        } else {
+          failed = true;
+        }
+
+        setNotice(
+          failed
+            ? "Some staff or role tools are unavailable or not permitted. Available data remains visible."
+            : null,
+        );
+      },
+    );
 
     return () => {
       active = false;
@@ -159,14 +378,72 @@ export function RoleStudioPage() {
     });
   }, [selectedUser]);
 
+  useEffect(() => {
+    if (!selectedRole) {
+      setRoleForm(emptyRoleForm);
+      return;
+    }
+    setRoleForm({
+      code: selectedRole.code,
+      name: selectedRole.name,
+      description: selectedRole.description ?? "",
+      permission_ids: selectedRole.permissions.map((permission) => permission.id),
+      is_active: selectedRole.is_active,
+    });
+  }, [selectedRole]);
+
   function branchLabel(branchId: string | null) {
     if (!branchId) return "All branches";
     return branchNameById.get(branchId) ?? branchId;
   }
 
-  function upsertUser(user: StaffUser) {
-    setUsers((current) => current.map((item) => (item.id === user.id ? user : item)));
-    setSelectedUserId(user.id);
+  function roleScopeLabel(role: Role | AssignableRole | undefined) {
+    if (!role) return "Unknown";
+    if (role.code === "admin") return "All branches";
+    return "Branch-scoped";
+  }
+
+  function upsertUser(nextUser: StaffUser) {
+    setUsers((current) =>
+      current.some((item) => item.id === nextUser.id)
+        ? current.map((item) => (item.id === nextUser.id ? nextUser : item))
+        : [nextUser, ...current],
+    );
+    setSelectedUserId(nextUser.id);
+  }
+
+  function upsertRole(nextRole: Role) {
+    setManagedRoles((current) =>
+      current.some((role) => role.id === nextRole.id)
+        ? current.map((role) => (role.id === nextRole.id ? nextRole : role))
+        : [nextRole, ...current],
+    );
+    setAssignableRoles((current) => {
+      const assignable = {
+        id: nextRole.id,
+        code: nextRole.code,
+        name: nextRole.name,
+        description: nextRole.description,
+      };
+      if (!nextRole.is_active) {
+        return current.filter((role) => role.id !== nextRole.id);
+      }
+      return current.some((role) => role.id === nextRole.id)
+        ? current.map((role) => (role.id === nextRole.id ? assignable : role))
+        : [...current, assignable].sort((left, right) =>
+            left.name.localeCompare(right.name),
+          );
+    });
+    setSelectedRoleId(nextRole.id);
+  }
+
+  function togglePermission(permissionId: string) {
+    setRoleForm((current) => ({
+      ...current,
+      permission_ids: current.permission_ids.includes(permissionId)
+        ? current.permission_ids.filter((item) => item !== permissionId)
+        : [...current.permission_ids, permissionId],
+    }));
   }
 
   async function handleCreateStaff(event: FormEvent) {
@@ -191,7 +468,7 @@ export function RoleStudioPage() {
     setBusy(true);
     try {
       if (!token || isPreview) {
-        const user: StaffUser = {
+        const nextUser: StaffUser = {
           id: `preview-user-${Date.now()}`,
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
@@ -206,8 +483,7 @@ export function RoleStudioPage() {
           is_verified: true,
           must_change_password: true,
         };
-        setUsers((current) => [user, ...current]);
-        setSelectedUserId(user.id);
+        upsertUser(nextUser);
         setCreateForm((current) => ({
           ...emptyCreateForm,
           role_id: current.role_id,
@@ -217,7 +493,7 @@ export function RoleStudioPage() {
         return;
       }
 
-      const user = await createStaffUser(token, {
+      const nextUser = await createStaffUser(token, {
         full_name: createForm.full_name.trim(),
         username: createForm.username.trim().toLowerCase(),
         email: createForm.email.trim().toLowerCase(),
@@ -226,14 +502,13 @@ export function RoleStudioPage() {
         role_id: createForm.role_id,
         branch_id: createForm.branch_id || null,
       });
-      setUsers((current) => [user, ...current]);
-      setSelectedUserId(user.id);
+      upsertUser(nextUser);
       setCreateForm((current) => ({
         ...emptyCreateForm,
         role_id: current.role_id,
         branch_id: current.branch_id,
       }));
-      setNotice(`Created staff user ${user.full_name}.`);
+      setNotice(`Created staff user ${nextUser.full_name}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create staff user.");
     } finally {
@@ -270,7 +545,7 @@ export function RoleStudioPage() {
         return;
       }
 
-      const user = await updateStaffUser(token, selectedUser.id, {
+      const nextUser = await updateStaffUser(token, selectedUser.id, {
         full_name: editForm.full_name.trim(),
         email: editForm.email.trim().toLowerCase(),
         phone: editForm.phone || null,
@@ -279,10 +554,107 @@ export function RoleStudioPage() {
         is_active: editForm.is_active,
         is_verified: editForm.is_verified,
       });
-      upsertUser(user);
-      setNotice(`Updated staff user ${user.full_name}.`);
+      upsertUser(nextUser);
+      setNotice(`Updated staff user ${nextUser.full_name}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not update staff user.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCreateRole(event: FormEvent) {
+    event.preventDefault();
+    const code = roleCodeFromName(roleForm.code || roleForm.name);
+    if (!roleForm.name.trim() || !code) {
+      setNotice("Role name and code are required.");
+      return;
+    }
+    if (!roleForm.permission_ids.length) {
+      setNotice("Select at least one permission for this role.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        const nextRole: Role = {
+          id: `preview-role-${Date.now()}`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          is_deleted: false,
+          code,
+          name: roleForm.name.trim(),
+          description: roleForm.description || null,
+          is_system: false,
+          is_active: true,
+          permissions: roleForm.permission_ids
+            .map((permissionId) => permissionById.get(permissionId))
+            .filter((permission): permission is Permission => Boolean(permission)),
+        };
+        upsertRole(nextRole);
+        setNotice(`Preview role ${nextRole.name} created locally.`);
+        return;
+      }
+
+      const nextRole = await createRole(token, {
+        code,
+        name: roleForm.name.trim(),
+        description: roleForm.description || null,
+        permission_ids: roleForm.permission_ids,
+      });
+      upsertRole(nextRole);
+      setNotice(`Created role ${nextRole.name}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not create role.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleUpdateRole(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedRole) {
+      setNotice("Select a role first.");
+      return;
+    }
+    if (selectedRole.is_system) {
+      setNotice("System roles are protected. Create a custom role if you need changes.");
+      return;
+    }
+    if (!roleForm.name.trim() || !roleForm.permission_ids.length) {
+      setNotice("Role name and at least one permission are required.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        const nextRole: Role = {
+          ...selectedRole,
+          updated_at: new Date().toISOString(),
+          name: roleForm.name.trim(),
+          description: roleForm.description || null,
+          is_active: roleForm.is_active,
+          permissions: roleForm.permission_ids
+            .map((permissionId) => permissionById.get(permissionId))
+            .filter((permission): permission is Permission => Boolean(permission)),
+        };
+        upsertRole(nextRole);
+        setNotice(`Preview role ${nextRole.name} updated locally.`);
+        return;
+      }
+
+      const nextRole = await updateRole(token, selectedRole.id, {
+        name: roleForm.name.trim(),
+        description: roleForm.description || null,
+        permission_ids: roleForm.permission_ids,
+        is_active: roleForm.is_active,
+      });
+      upsertRole(nextRole);
+      setNotice(`Updated role ${nextRole.name}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not update role.");
     } finally {
       setBusy(false);
     }
@@ -295,9 +667,8 @@ export function RoleStudioPage() {
           <p className="eyebrow">Staff & permissions</p>
           <h1>Staff and roles</h1>
           <p>
-            Create staff accounts, assign branch-scoped roles, keep risky role
-            changes behind backend safeguards, and prepare for custom permission
-            roles later.
+            Create staff accounts, assign branch-scoped roles, and let Admins
+            compose custom permission roles without touching code.
           </p>
         </div>
         <StatusPill tone="info">Backend-enforced role assignment</StatusPill>
@@ -324,9 +695,35 @@ export function RoleStudioPage() {
           </StatusPill>
         </article>
         <article className="metric-card">
-          <span>Assignable roles</span>
+          <span>Roles</span>
           <strong>{integer(stats.roles)}</strong>
-          <StatusPill tone="neutral">By your role</StatusPill>
+          <StatusPill tone={stats.customRoles ? "success" : "neutral"}>
+            {integer(stats.customRoles)} custom
+          </StatusPill>
+        </article>
+      </div>
+
+      <div className="role-rule-grid m-t">
+        <article className="panel-card role-rule-card">
+          <strong>Admin role control</strong>
+          <span>
+            Admin can create custom roles, choose permissions, assign roles to
+            staff, and create another Admin account when needed.
+          </span>
+        </article>
+        <article className="panel-card role-rule-card">
+          <strong>Branch manager limit</strong>
+          <span>
+            Branch Managers can manage Cashiers and Technicians in their own
+            branch only. They cannot appoint peers or Admins.
+          </span>
+        </article>
+        <article className="panel-card role-rule-card">
+          <strong>System role safety</strong>
+          <span>
+            Built-in roles stay protected. Create a custom role when the client
+            wants a new staff type such as Accountant or Supervisor.
+          </span>
         </article>
       </div>
 
@@ -414,9 +811,9 @@ export function RoleStudioPage() {
                   }
                 >
                   <option value="">Select role</option>
-                  {roles.map((role) => (
+                  {assignableRoles.map((role) => (
                     <option key={role.id} value={role.id}>
-                      {role.name}
+                      {role.name} ({roleScopeLabel(role)})
                     </option>
                   ))}
                 </select>
@@ -541,7 +938,7 @@ export function RoleStudioPage() {
                         }
                       >
                         <option value="">Select role</option>
-                        {roles.map((role) => (
+                        {assignableRoles.map((role) => (
                           <option key={role.id} value={role.id}>
                             {role.name}
                           </option>
@@ -617,6 +1014,14 @@ export function RoleStudioPage() {
               <p className="eyebrow">Staff</p>
               <h2>Users</h2>
             </div>
+            <label className="table-search">
+              <span>Search</span>
+              <input
+                value={userSearch}
+                onChange={(event) => setUserSearch(event.target.value)}
+                placeholder="Name, role, branch"
+              />
+            </label>
           </header>
           <table className="data-table">
             <thead>
@@ -630,24 +1035,32 @@ export function RoleStudioPage() {
               </tr>
             </thead>
             <tbody>
-              {users.map((user) => (
-                <tr
-                  key={user.id}
-                  className={selectedUser?.id === user.id ? "is-selected" : ""}
-                  onClick={() => setSelectedUserId(user.id)}
-                >
-                  <td>{user.full_name}</td>
-                  <td>{user.username}</td>
-                  <td>{roleNameById.get(user.role_id) ?? user.role_id}</td>
-                  <td>{branchLabel(user.branch_id)}</td>
-                  <td>
-                    <StatusPill tone={toneForStatus(user.is_active)}>
-                      {user.is_active ? "Active" : "Inactive"}
-                    </StatusPill>
+              {filteredUsers.length ? (
+                filteredUsers.map((staff) => (
+                  <tr
+                    key={staff.id}
+                    className={selectedUser?.id === staff.id ? "is-selected" : ""}
+                    onClick={() => setSelectedUserId(staff.id)}
+                  >
+                    <td>{staff.full_name}</td>
+                    <td>{staff.username}</td>
+                    <td>{roleNameById.get(staff.role_id) ?? staff.role_id}</td>
+                    <td>{branchLabel(staff.branch_id)}</td>
+                    <td>
+                      <StatusPill tone={toneForStatus(staff.is_active)}>
+                        {staff.is_active ? "Active" : "Inactive"}
+                      </StatusPill>
+                    </td>
+                    <td>{dateLabel(staff.created_at)}</td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={6} className="empty-table-cell">
+                    No staff users match the search.
                   </td>
-                  <td>{dateLabel(user.created_at)}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </section>
@@ -655,44 +1068,41 @@ export function RoleStudioPage() {
         <section className="panel-card">
           <header className="panel-card__header">
             <div>
-              <p className="eyebrow">Assignable roles</p>
-              <h2>Role list</h2>
+              <p className="eyebrow">Roles</p>
+              <h2>Role library</h2>
             </div>
-            <StatusPill tone="warning">Role CRUD backend pending</StatusPill>
+            <label className="table-search">
+              <span>Search</span>
+              <input
+                value={roleSearch}
+                onChange={(event) => setRoleSearch(event.target.value)}
+                placeholder="Role or permission"
+              />
+            </label>
           </header>
-          <table className="data-table">
-            <thead>
-              <tr>
-                <th>Code</th>
-                <th>Name</th>
-                <th>Description</th>
-              </tr>
-            </thead>
-            <tbody>
-              {roles.map((role) => (
-                <tr key={role.id}>
-                  <td>{role.code}</td>
-                  <td>{role.name}</td>
-                  <td>{role.description ?? "-"}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="form-panel form-panel--bordered">
-            <strong>Assignment rule</strong>
-            <p className="muted">
-              This frontend only shows roles returned by the backend for the
-              current user. The backend still enforces the important rule:
-              Branch Managers cannot create Admins or peer managers, while
-              Admins can assign any role.
-            </p>
-            {selectedUser && (
-              <p className="muted">
-                Selected role:{" "}
-                {roleById.get(selectedUser.role_id)?.name ?? selectedUser.role_id}
-              </p>
-            )}
+          <div className="role-card-list">
+            {filteredRoles.map((role) => (
+              <button
+                className={selectedRole?.id === role.id ? "is-selected" : ""}
+                key={role.id}
+                onClick={() => setSelectedRoleId(role.id)}
+                type="button"
+              >
+                <div>
+                  <strong>{role.name}</strong>
+                  <span>{role.code}</span>
+                </div>
+                <div className="table-actions">
+                  <StatusPill tone={role.is_system ? "neutral" : "info"}>
+                    {role.is_system ? "System" : "Custom"}
+                  </StatusPill>
+                  <StatusPill tone={toneForStatus(role.is_active)}>
+                    {role.is_active ? "Active" : "Inactive"}
+                  </StatusPill>
+                </div>
+                <small>{integer(role.permissions.length)} permission(s)</small>
+              </button>
+            ))}
           </div>
         </section>
       </div>
@@ -700,28 +1110,131 @@ export function RoleStudioPage() {
       <section className="panel-card m-t">
         <header className="panel-card__header">
           <div>
-            <p className="eyebrow">Permission matrix</p>
-            <h2>Future custom role editor</h2>
+            <p className="eyebrow">Permission studio</p>
+            <h2>{selectedRole?.name ?? "Create custom role"}</h2>
           </div>
-          <StatusPill tone="warning">Display only</StatusPill>
+          <StatusPill tone={selectedRole?.is_system ? "warning" : "success"}>
+            {selectedRole?.is_system ? "System role locked" : "Custom role editable"}
+          </StatusPill>
         </header>
-        <div className="permission-matrix">
-          {permissionGroups.map(([group, ...permissions]) => (
-            <fieldset key={group}>
-              <legend>{group}</legend>
-              {permissions.map((permission) => (
-                <label key={permission}>
-                  <input
-                    type="checkbox"
-                    defaultChecked={!permission.includes("Void")}
-                    disabled
-                  />
-                  {permission}
-                </label>
-              ))}
-            </fieldset>
-          ))}
-        </div>
+
+        <form
+          className="role-builder"
+          onSubmit={selectedRole && !selectedRole.is_system ? handleUpdateRole : handleCreateRole}
+        >
+          <div className="role-builder__form">
+            <div className="form-grid form-grid--three">
+              <label>
+                Role name
+                <input
+                  value={roleForm.name}
+                  onChange={(event) =>
+                    setRoleForm((current) => ({
+                      ...current,
+                      name: event.target.value,
+                      code:
+                        !selectedRole || selectedRole.is_system
+                          ? roleCodeFromName(event.target.value)
+                          : current.code,
+                    }))
+                  }
+                  placeholder="Sales Supervisor"
+                />
+              </label>
+              <label>
+                Role code
+                <input
+                  value={roleForm.code}
+                  disabled={Boolean(selectedRole && !selectedRole.is_system)}
+                  onChange={(event) =>
+                    setRoleForm((current) => ({
+                      ...current,
+                      code: roleCodeFromName(event.target.value),
+                    }))
+                  }
+                  placeholder="sales_supervisor"
+                />
+              </label>
+              <label>
+                Status
+                <select
+                  value={roleForm.is_active ? "true" : "false"}
+                  disabled={selectedRole?.is_system}
+                  onChange={(event) =>
+                    setRoleForm((current) => ({
+                      ...current,
+                      is_active: event.target.value === "true",
+                    }))
+                  }
+                >
+                  <option value="true">Active</option>
+                  <option value="false">Inactive</option>
+                </select>
+              </label>
+            </div>
+            <label>
+              Description
+              <textarea
+                value={roleForm.description}
+                onChange={(event) =>
+                  setRoleForm((current) => ({
+                    ...current,
+                    description: event.target.value,
+                  }))
+                }
+                placeholder="Explain where this role fits in the shop"
+              />
+            </label>
+            <div className="role-builder__summary">
+              <strong>{integer(roleForm.permission_ids.length)} selected</strong>
+              <span>
+                {selectedRolePermissionCodes.slice(0, 5).join(", ") ||
+                  "Choose permissions below"}
+              </span>
+            </div>
+          </div>
+
+          <div className="permission-matrix permission-matrix--editable">
+            {permissionGroups.map(([group, groupPermissions]) => (
+              <fieldset key={group}>
+                <legend>{titleize(group)}</legend>
+                {groupPermissions.map((permission) => (
+                  <label key={permission.id}>
+                    <input
+                      type="checkbox"
+                      checked={roleForm.permission_ids.includes(permission.id)}
+                      disabled={selectedRole?.is_system}
+                      onChange={() => togglePermission(permission.id)}
+                    />
+                    <span>
+                      <strong>{permission.code}</strong>
+                      {permission.description}
+                    </span>
+                  </label>
+                ))}
+              </fieldset>
+            ))}
+          </div>
+
+          <div className="form-footer role-builder__actions">
+            <button
+              className="secondary-button"
+              type="button"
+              onClick={() => {
+                setSelectedRoleId("");
+                setRoleForm(emptyRoleForm);
+              }}
+            >
+              New Custom Role
+            </button>
+            <button
+              className="primary-button"
+              disabled={busy || Boolean(selectedRole?.is_system && selectedRoleId)}
+            >
+              {selectedRole && !selectedRole.is_system ? "Save Role" : "Create Role"}
+            </button>
+          </div>
+        </form>
       </section>
     </section>
   );

@@ -25,6 +25,11 @@ def enforce_role_assignment(
     target_role_code: str,
     target_branch_id: UUID | None,
 ) -> None:
+    if principal.role_code == ADMIN:
+        if target_role_code != ADMIN and target_branch_id is None:
+            raise AuthorizationError("branch-scoped staff require a branch")
+        return
+
     allowed_roles = ASSIGNABLE_ROLES.get(principal.role_code, frozenset())
     if target_role_code not in allowed_roles:
         raise AuthorizationError("this role cannot assign the requested role")

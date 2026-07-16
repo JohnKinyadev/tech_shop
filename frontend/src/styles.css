@@ -732,6 +732,134 @@ button:disabled {
   margin-top: 9px;
 }
 
+.role-rule-grid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.role-rule-card {
+  display: grid;
+  gap: 6px;
+  padding: 13px;
+}
+
+.role-rule-card span,
+.role-card-list span,
+.role-card-list small,
+.role-builder__summary span,
+.permission-matrix--editable label span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.role-card-list {
+  display: grid;
+  gap: 8px;
+  max-height: 520px;
+  overflow: auto;
+  padding: 12px;
+}
+
+.role-card-list button {
+  display: grid;
+  gap: 8px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.role-card-list button:hover,
+.role-card-list button.is-selected {
+  border-color: #b9d8f0;
+  background: #f4f9fd;
+}
+
+.role-card-list button > div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.role-builder {
+  display: grid;
+  gap: 0;
+}
+
+.role-builder__form {
+  display: grid;
+  gap: 12px;
+  padding: 15px;
+  border-bottom: 1px solid var(--line);
+}
+
+.role-builder__form label {
+  display: grid;
+  gap: 5px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.role-builder__form input,
+.role-builder__form select,
+.role-builder__form textarea {
+  width: 100%;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  color: var(--text);
+  background: #fff;
+  outline: none;
+}
+
+.role-builder__form input,
+.role-builder__form select {
+  height: 36px;
+  padding: 6px 9px;
+}
+
+.role-builder__form textarea {
+  min-height: 74px;
+  padding: 8px 9px;
+  resize: vertical;
+}
+
+.role-builder__summary {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfd;
+}
+
+.permission-matrix--editable {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+}
+
+.permission-matrix--editable label {
+  align-items: flex-start;
+}
+
+.permission-matrix--editable label span {
+  display: grid;
+  gap: 3px;
+}
+
+.permission-matrix--editable label strong {
+  color: var(--text);
+}
+
+.role-builder__actions {
+  gap: 10px;
+  padding: 0 15px 15px;
+}
+
 .pipeline-board {
   display: grid;
   grid-template-columns: repeat(7, minmax(0, 1fr));

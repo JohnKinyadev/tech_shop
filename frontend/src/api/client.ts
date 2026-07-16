@@ -18,6 +18,7 @@ import type {
   InventoryBalance,
   Page,
   Payment,
+  Permission,
   Product,
   ProductCreatePayload,
   ProductImage,
@@ -34,6 +35,9 @@ import type {
   RepairAssignmentPayload,
   RepairBookingPayload,
   RepairStatusPayload,
+  Role,
+  RoleCreatePayload,
+  RoleUpdatePayload,
   SalePaymentPayload,
   SerializedUnit,
   RepairTicket,
@@ -654,4 +658,28 @@ export function updateStaffUser(
 
 export function listAssignableRoles(token: string) {
   return apiRequest<AssignableRole[]>("/roles", { token });
+}
+
+export function listPermissions(token: string) {
+  return apiRequest<Permission[]>("/permissions", { token });
+}
+
+export function listManagedRoles(token: string) {
+  return apiRequest<Role[]>("/roles/manage", { token });
+}
+
+export function createRole(token: string, body: RoleCreatePayload) {
+  return apiRequest<Role>("/roles", {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function updateRole(token: string, roleId: string, body: RoleUpdatePayload) {
+  return apiRequest<Role>(`/roles/${roleId}`, {
+    token,
+    method: "PATCH",
+    body,
+  });
 }
