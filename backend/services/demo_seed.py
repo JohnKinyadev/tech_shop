@@ -241,19 +241,69 @@ def _user(
     return user
 
 
+def _soft_delete_legacy_demo_users(db: Session) -> None:
+    legacy_usernames = {
+        "demo_admin",
+        "demo_manager",
+        "demo_inventory",
+        "demo_technician",
+        "demo_cashier",
+        "demo_accountant",
+    }
+    users = db.scalars(
+        select(User).where(
+            func.lower(User.username).in_(legacy_usernames),
+            User.is_deleted.is_(False),
+        )
+    ).all()
+    for user in users:
+        user.is_active = False
+        user.is_deleted = True
+
+
+def _soft_delete_legacy_demo_catalog(db: Session) -> None:
+    legacy_brand_names = {
+        "lenovo demo",
+        "samsung demo",
+        "oraimo demo",
+        "kingston demo",
+        "generic demo parts",
+    }
+
+    for brand in db.scalars(
+        select(Brand).where(
+            func.lower(Brand.name).in_(legacy_brand_names),
+            Brand.is_deleted.is_(False),
+        )
+    ):
+        brand.is_active = False
+        brand.is_deleted = True
+
+
 def _category(
     db: Session, result: DemoSeedResult, principal: AuthPrincipal, name: str, slug: str
 ) -> Category:
     item = db.scalar(
-        select(Category).where(Category.slug == slug, Category.is_deleted.is_(False))
+        select(Category).where(
+            (
+                (Category.slug == slug)
+                | (func.lower(Category.name) == name.strip().lower())
+            ),
+            Category.is_deleted.is_(False),
+        )
     )
     if item is None:
         item = catalog.create_category(
             db,
             principal,
-            CategoryCreate(name=name, slug=slug, description=f"Demo {name.lower()}"),
+            CategoryCreate(name=name, slug=slug, description=f"Seeded {name.lower()}"),
         )
         result.add("categories")
+    else:
+        item.name = name
+        item.slug = slug
+        item.description = f"Seeded {name.lower()}"
+        item.is_active = True
     return item
 
 
@@ -267,7 +317,7 @@ def _brand(
     )
     if item is None:
         item = catalog.create_brand(
-            db, principal, BrandCreate(name=name, description=f"Demo {name} brand")
+            db, principal, BrandCreate(name=name, description=f"Seeded {name} brand")
         )
         result.add("brands")
     return item
@@ -307,7 +357,7 @@ def _product_with_variant(
             ProductCreate(
                 name=name,
                 slug=slug,
-                description=f"Demo product: {name}",
+                description=f"Seeded product: {name}",
                 category_id=category_id,
                 brand_id=brand_id,
                 warranty_months=warranty_months,
@@ -330,6 +380,20 @@ def _product_with_variant(
             raise RuntimeError(f"created variant {sku} could not be loaded")
     else:
         product_id = variant.product_id
+        product = db.scalar(
+            select(Product).where(
+                Product.id == product_id,
+                Product.is_deleted.is_(False),
+            )
+        )
+        if product is not None:
+            product.name = name
+            product.slug = slug
+            product.description = f"Seeded product: {name}"
+            product.category_id = category_id
+            product.brand_id = brand_id
+            product.warranty_months = warranty_months
+            product.is_active = True
 
     image_count = db.scalar(
         select(func.count())
@@ -527,15 +591,23 @@ def _till_and_session(
     branch: Branch,
 ) -> TillSession | None:
     till = db.scalar(
-        select(Till).where(Till.code == "DEMO-HQ-01", Till.is_deleted.is_(False))
+        select(Till).where(
+            Till.code.in_(("HQ-POS-01", "DEMO-HQ-01")),
+            Till.is_deleted.is_(False),
+        )
     )
     if till is None:
         till = tills.create_till(
             db,
             manager,
-            TillCreate(branch_id=branch.id, name="Demo Main POS", code="DEMO-HQ-01"),
+            TillCreate(branch_id=branch.id, name="Main POS", code="HQ-POS-01"),
         )
         result.add("tills")
+    else:
+        till.name = "Main POS"
+        till.code = "HQ-POS-01"
+        till.branch_id = branch.id
+        till.is_active = True
     result.ids["till"] = str(till.id)
 
     session = db.scalar(
@@ -550,15 +622,38 @@ def _till_and_session(
         return session
 
     till_open = db.scalar(
-        select(TillSession.id).where(
+        select(TillSession).where(
             TillSession.till_id == till.id,
             TillSession.status == TillSessionStatus.OPEN,
             TillSession.is_deleted.is_(False),
         )
     )
     if till_open is not None:
-        result.skip("demo till already has an open session owned by another user")
-        return None
+        legacy_cashier = db.get(User, till_open.cashier_id)
+        legacy_usernames = {
+            "demo_admin",
+            "demo_manager",
+            "demo_inventory",
+            "demo_technician",
+            "demo_cashier",
+            "demo_accountant",
+        }
+        if (
+            legacy_cashier is not None
+            and (
+                legacy_cashier.is_deleted
+                or not legacy_cashier.is_active
+                or legacy_cashier.username in legacy_usernames
+            )
+        ):
+            till_open.status = TillSessionStatus.CLOSED
+            till_open.closed_at = datetime.now(timezone.utc)
+            till_open.expected_cash = till_open.opening_float
+            till_open.closing_cash = till_open.opening_float
+            db.flush()
+        else:
+            result.skip("sample till already has an open session owned by another user")
+            return None
 
     session = tills.open_session(
         db,
@@ -959,8 +1054,8 @@ def _expenses(
 def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedResult:
     """Seed a coherent demo dataset for the staff API.
 
-    The seed is intentionally idempotent. Re-running it updates demo users and reuses
-    existing demo records instead of creating duplicates.
+    The seed is intentionally idempotent. Re-running it updates sample users and reuses
+    existing sample records instead of creating duplicates.
     """
 
     result = DemoSeedResult()
@@ -970,7 +1065,7 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
         db,
         result,
         code="HQ",
-        name="Demo Main Branch",
+        name="Main Branch",
         city="Nairobi",
         headquarters=True,
     )
@@ -978,26 +1073,36 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
         db,
         result,
         code="EAST",
-        name="Demo East Branch",
+        name="East Branch",
         city="Nairobi",
     )
 
     admin_user = _user(
         db,
         result,
-        username="demo_admin",
-        full_name="Demo Admin",
-        email="demo.admin@example.com",
+        username="admin1",
+        full_name="Admin 1",
+        email="admin1@example.com",
         role_code=ADMIN,
         branch_id=hq.id,
+        password=password,
+    )
+    _user(
+        db,
+        result,
+        username="admin2",
+        full_name="Admin 2",
+        email="admin2@example.com",
+        role_code=ADMIN,
+        branch_id=None,
         password=password,
     )
     manager_user = _user(
         db,
         result,
-        username="demo_manager",
-        full_name="Demo Branch Manager",
-        email="demo.manager@example.com",
+        username="manager1",
+        full_name="Manager 1",
+        email="manager1@example.com",
         role_code=BRANCH_MANAGER,
         branch_id=hq.id,
         password=password,
@@ -1005,9 +1110,19 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
     _user(
         db,
         result,
-        username="demo_inventory",
-        full_name="Demo Inventory Manager",
-        email="demo.inventory@example.com",
+        username="manager2",
+        full_name="Manager 2",
+        email="manager2@example.com",
+        role_code=BRANCH_MANAGER,
+        branch_id=east.id,
+        password=password,
+    )
+    _user(
+        db,
+        result,
+        username="inventory1",
+        full_name="Inventory 1",
+        email="inventory1@example.com",
         role_code=INVENTORY_MANAGER,
         branch_id=hq.id,
         password=password,
@@ -1015,9 +1130,9 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
     technician_user = _user(
         db,
         result,
-        username="demo_technician",
-        full_name="Demo Technician",
-        email="demo.technician@example.com",
+        username="technician1",
+        full_name="Technician 1",
+        email="technician1@example.com",
         role_code=TECHNICIAN,
         branch_id=hq.id,
         password=password,
@@ -1025,9 +1140,9 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
     cashier_user = _user(
         db,
         result,
-        username="demo_cashier",
-        full_name="Demo Cashier",
-        email="demo.cashier@example.com",
+        username="cashier1",
+        full_name="Cashier 1",
+        email="cashier1@example.com",
         role_code=CASHIER,
         branch_id=hq.id,
         password=password,
@@ -1035,13 +1150,24 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
     _user(
         db,
         result,
-        username="demo_accountant",
-        full_name="Demo Accountant",
-        email="demo.accountant@example.com",
+        username="cashier2",
+        full_name="Cashier 2",
+        email="cashier2@example.com",
+        role_code=CASHIER,
+        branch_id=east.id,
+        password=password,
+    )
+    _user(
+        db,
+        result,
+        username="accountant1",
+        full_name="Accountant 1",
+        email="accountant1@example.com",
         role_code=ACCOUNTANT,
         branch_id=hq.id,
         password=password,
     )
+    _soft_delete_legacy_demo_users(db)
     db.flush()
 
     admin = _principal(db, admin_user, ADMIN)
@@ -1049,28 +1175,30 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
     technician = _principal(db, technician_user, TECHNICIAN)
     cashier = _principal(db, cashier_user, CASHIER)
 
+    _soft_delete_legacy_demo_catalog(db)
+
     categories = {
-        "laptops": _category(db, result, admin, "Laptops", "demo-laptops"),
-        "phones": _category(db, result, admin, "Phones", "demo-phones"),
+        "laptops": _category(db, result, admin, "Laptops", "laptops"),
+        "phones": _category(db, result, admin, "Phones", "phones"),
         "accessories": _category(
-            db, result, admin, "Accessories", "demo-accessories"
+            db, result, admin, "Accessories", "accessories"
         ),
-        "parts": _category(db, result, admin, "Repair Parts", "demo-repair-parts"),
+        "parts": _category(db, result, admin, "Repair Parts", "repair-parts"),
     }
     brands = {
-        "lenovo": _brand(db, result, admin, "Lenovo Demo"),
-        "samsung": _brand(db, result, admin, "Samsung Demo"),
-        "oraimo": _brand(db, result, admin, "Oraimo Demo"),
-        "kingston": _brand(db, result, admin, "Kingston Demo"),
-        "generic": _brand(db, result, admin, "Generic Demo Parts"),
+        "lenovo": _brand(db, result, admin, "Lenovo"),
+        "samsung": _brand(db, result, admin, "Samsung"),
+        "oraimo": _brand(db, result, admin, "Oraimo"),
+        "kingston": _brand(db, result, admin, "Kingston"),
+        "generic": _brand(db, result, admin, "Generic Parts"),
     }
     variants = {
         "DEMO-LAP-T480": _product_with_variant(
             db,
             result,
             admin,
-            name="Demo Lenovo ThinkPad T480",
-            slug="demo-lenovo-thinkpad-t480",
+            name="Lenovo ThinkPad T480",
+            slug="lenovo-thinkpad-t480",
             category_id=categories["laptops"].id,
             brand_id=brands["lenovo"].id,
             warranty_months=6,
@@ -1085,8 +1213,8 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             db,
             result,
             admin,
-            name="Demo Samsung Galaxy A15",
-            slug="demo-samsung-galaxy-a15",
+            name="Samsung Galaxy A15",
+            slug="samsung-galaxy-a15",
             category_id=categories["phones"].id,
             brand_id=brands["samsung"].id,
             warranty_months=12,
@@ -1101,8 +1229,8 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             db,
             result,
             admin,
-            name="Demo Oraimo USB-C Charger",
-            slug="demo-oraimo-usb-c-charger",
+            name="Oraimo USB-C Charger",
+            slug="oraimo-usb-c-charger",
             category_id=categories["accessories"].id,
             brand_id=brands["oraimo"].id,
             warranty_months=3,
@@ -1117,8 +1245,8 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             db,
             result,
             admin,
-            name="Demo Kingston 64GB Flash Disk",
-            slug="demo-kingston-64gb-flash-disk",
+            name="Kingston 64GB Flash Disk",
+            slug="kingston-64gb-flash-disk",
             category_id=categories["accessories"].id,
             brand_id=brands["kingston"].id,
             warranty_months=1,
@@ -1133,8 +1261,8 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             db,
             result,
             admin,
-            name="Demo Galaxy A15 Screen Assembly",
-            slug="demo-galaxy-a15-screen-assembly",
+            name="Galaxy A15 Screen Assembly",
+            slug="galaxy-a15-screen-assembly",
             category_id=categories["parts"].id,
             brand_id=brands["generic"].id,
             warranty_months=0,
