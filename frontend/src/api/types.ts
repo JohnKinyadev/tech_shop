@@ -259,6 +259,13 @@ export type SalePaymentPayload = {
   notes?: string | null;
 };
 
+export type MpesaStkPushPayload = {
+  phone_number: string;
+  amount: string | number;
+  idempotency_key: string;
+  notes?: string | null;
+};
+
 export type Payment = ModelResponse & {
   branch_id: UUID;
   sale_id: UUID | null;
@@ -273,6 +280,13 @@ export type Payment = ModelResponse & {
   provider_reference: string | null;
   paid_at: string | null;
   notes: string | null;
+};
+
+export type MpesaStkPushResponse = {
+  payment: Payment;
+  merchant_request_id: string;
+  checkout_request_id: string;
+  customer_message: string;
 };
 
 export type Receipt = {

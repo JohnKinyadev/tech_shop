@@ -8,7 +8,12 @@ from backend.models.enums import SaleStatus
 from backend.schemas.approval_schemas import ApprovalDecision, ApprovalRequestResponse
 from backend.schemas.base_schemas import Page
 from backend.schemas.customer_schemas import CustomerCreate, CustomerResponse
-from backend.schemas.payments_schemas import PaymentResponse, SalePaymentCreate
+from backend.schemas.payments_schemas import (
+    MpesaStkPushCreate,
+    MpesaStkPushResponse,
+    PaymentResponse,
+    SalePaymentCreate,
+)
 from backend.schemas.sales_schemas import (
     POSSaleResponse,
     ReceiptResponse,
@@ -25,6 +30,7 @@ from backend.schemas.sales_schemas import (
 )
 from backend.schemas.warranty_schemas import WarrantyResponse
 from backend.services import customers as customer_service
+from backend.services import mpesa as mpesa_service
 from backend.services import returns as return_service
 from backend.services import sales as sale_service
 from backend.services import tills as till_service
@@ -239,6 +245,25 @@ def add_sale_payment(
     item = sale_service.add_payment(db, principal, sale_id, payload)
     db.commit()
     return item
+
+
+@router.post("/sales/{sale_id}/mpesa/stk-push", response_model=MpesaStkPushResponse)
+def send_mpesa_stk_push(
+    sale_id: UUID,
+    payload: MpesaStkPushCreate,
+    principal: SalesPrincipal,
+    db: DatabaseSession,
+) -> MpesaStkPushResponse:
+    item = mpesa_service.initiate_sale_stk_push(db, principal, sale_id, payload)
+    db.commit()
+    return item
+
+
+@router.post("/mpesa/callback", include_in_schema=False)
+def mpesa_callback(payload: dict, db: DatabaseSession) -> dict[str, str]:
+    mpesa_service.handle_stk_callback(db, payload)
+    db.commit()
+    return {"ResultCode": "0", "ResultDesc": "Accepted"}
 
 
 @router.post("/sales/{sale_id}/cancel", response_model=POSSaleResponse)

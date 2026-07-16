@@ -111,6 +111,12 @@ server-controlled prices, enforce minimum selling prices, support split cash, M-
 card, and bank payments, and deduct stock only when fully paid. Completed sales generate
 safe receipt and warranty responses without exposing inventory cost.
 
+M-Pesa STK Push uses Daraja credentials from `.env`: `TECH_SHOP_MPESA_CONSUMER_KEY`,
+`TECH_SHOP_MPESA_CONSUMER_SECRET`, `TECH_SHOP_MPESA_PASSKEY`,
+`TECH_SHOP_MPESA_SHORTCODE`, and `TECH_SHOP_MPESA_CALLBACK_BASE_URL`. The callback base
+URL must be a public backend URL that Safaricom can reach; localhost callbacks will not
+complete live prompts.
+
 Unpaid sales can be cancelled by their cashier. Paid voids and product returns are
 request-and-approve workflows: Cashiers initiate them, while an Admin or Branch Manager
 must approve them. Refunds reverse the original payment methods, returned resellable stock

@@ -25,6 +25,8 @@ import type {
   GoodsReceipt,
   GoodsReceiptPayload,
   InventoryBalance,
+  MpesaStkPushPayload,
+  MpesaStkPushResponse,
   Page,
   Payment,
   Permission,
@@ -311,12 +313,28 @@ export function createPosSale(token: string, body: PosSaleCreatePayload) {
   });
 }
 
+export function getPosSale(token: string, saleId: string) {
+  return apiRequest<PosSale>(`/pos/sales/${saleId}`, { token });
+}
+
 export function addSalePayment(
   token: string,
   saleId: string,
   body: SalePaymentPayload,
 ) {
   return apiRequest<Payment>(`/pos/sales/${saleId}/payments`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function sendMpesaStkPush(
+  token: string,
+  saleId: string,
+  body: MpesaStkPushPayload,
+) {
+  return apiRequest<MpesaStkPushResponse>(`/pos/sales/${saleId}/mpesa/stk-push`, {
     token,
     method: "POST",
     body,

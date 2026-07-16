@@ -120,7 +120,7 @@ Routers should not contain business logic. If a rule matters, put it in a servic
 | File | Purpose |
 | --- | --- |
 | `backend/core/__init__.py` | Core package marker |
-| `backend/core/config.py` | Environment/settings loading, including JWT and frontend CORS origins |
+| `backend/core/config.py` | Environment/settings loading, including JWT, frontend CORS origins, and M-Pesa Daraja settings |
 | `backend/core/permissions.py` | Role codes, permission codes, role-permission matrix |
 | `backend/core/security.py` | Password hashing and JWT helpers |
 
@@ -199,6 +199,7 @@ Routers should not contain business logic. If a rule matters, put it in a servic
 | `backend/services/tills.py` | Tills and till sessions |
 | `backend/services/customers.py` | POS customer creation/listing |
 | `backend/services/sales.py` | POS sales, payments, stock deduction, warranties |
+| `backend/services/mpesa.py` | M-Pesa Daraja STK Push initiation and callback completion |
 | `backend/services/returns.py` | Voids, returns, refunds |
 | `backend/services/repairs.py` | Repair workflow and parts usage |
 | `backend/services/repair_billing.py` | Repair invoices, payments, collection |
@@ -363,6 +364,8 @@ matching `backend/schemas/*_schemas.py` file or in Swagger.
 | POST | `/pos/sales` | - | `SaleCreate` | Creates pending POS sale |
 | GET | `/pos/sales/{sale_id}` | `sale_id` path | - | Gets sale |
 | POST | `/pos/sales/{sale_id}/payments` | `sale_id` path | `SalePaymentCreate` | Adds sale payment; fully paid sale deducts stock |
+| POST | `/pos/sales/{sale_id}/mpesa/stk-push` | `sale_id` path | `MpesaStkPushCreate` | Sends customer M-Pesa STK Push and creates a pending payment |
+| POST | `/pos/mpesa/callback` | - | Safaricom callback payload | Completes or fails pending M-Pesa payment from Daraja callback |
 | POST | `/pos/sales/{sale_id}/cancel` | `sale_id` path | - | Cancels unpaid sale |
 | GET | `/pos/sales/{sale_id}/receipt` | `sale_id` path | - | Gets printable receipt data |
 | GET | `/pos/sales/void-requests` | `branch_id` query | - | Lists sale void approvals |

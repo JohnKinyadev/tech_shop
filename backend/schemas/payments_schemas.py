@@ -51,3 +51,17 @@ class PaymentResponse(ModelResponse):
     provider_reference: str | None
     paid_at: datetime | None
     notes: str | None
+
+
+class MpesaStkPushCreate(BaseSchema):
+    phone_number: str = Field(min_length=9, max_length=15)
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    idempotency_key: str = Field(min_length=8, max_length=150)
+    notes: str | None = Field(default=None, max_length=500)
+
+
+class MpesaStkPushResponse(BaseSchema):
+    payment: PaymentResponse
+    merchant_request_id: str
+    checkout_request_id: str
+    customer_message: str

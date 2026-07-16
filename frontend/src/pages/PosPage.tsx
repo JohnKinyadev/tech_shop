@@ -6,12 +6,14 @@ import {
   closeTillSession,
   createPosSale,
   currentTillSession,
+  getPosSale,
   getSaleReceipt,
   listCatalogProducts,
   listPosSales,
   listSerializedUnits,
   listTills,
   openTillSession,
+  sendMpesaStkPush,
 } from "../api/client";
 import type {
   CatalogProduct,
@@ -49,6 +51,10 @@ function idempotencyKey() {
     return crypto.randomUUID();
   }
   return `pos-${Date.now()}-${Math.random().toString(16).slice(2)}`;
+}
+
+function wait(ms: number) {
+  return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
 function unitLabel(unit?: SerializedUnit) {
@@ -101,6 +107,7 @@ export function PosPage() {
   const [cart, setCart] = useState<CartItem[]>([]);
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentReference, setPaymentReference] = useState("");
+  const [mpesaPhone, setMpesaPhone] = useState("");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
@@ -360,6 +367,55 @@ export function PosPage() {
     openPayment();
   }
 
+  async function ensurePendingSale() {
+    if (!token || !user?.branch_id || !tillSession) {
+      throw new Error("A branch and open till session are required before payment.");
+    }
+    const sale =
+      pendingSale ??
+      (await createPosSale(token, {
+        branch_id: user.branch_id,
+        till_session_id: tillSession.id,
+        channel: "pos",
+        notes: "Created from POS terminal",
+        items: cart.map((item) => ({
+          variant_id: item.variantId,
+          serialized_unit_id: item.serializedUnitId,
+          quantity: item.quantity,
+          discount_amount: 0,
+        })),
+      }));
+    setPendingSale(sale);
+    return sale;
+  }
+
+  async function waitForMpesaCompletion(saleId: string) {
+    if (!token) return false;
+
+    for (let attempt = 0; attempt < 8; attempt += 1) {
+      await wait(4000);
+      const latestSale = await getPosSale(token, saleId);
+      if (latestSale.status === "completed") {
+        const officialReceipt = await getSaleReceipt(token, saleId);
+        setReceipt(officialReceipt);
+        setReceiptViewer(officialReceipt);
+        setCart([]);
+        setPendingSale(null);
+        setPaymentReference("");
+        setMpesaPhone("");
+        setPaymentOpen(false);
+        setNotice(`M-Pesa payment received. Sale ${officialReceipt.invoice_number} completed.`);
+        void refreshRecentSales();
+        return true;
+      }
+      if (["cancelled", "voided", "refunded"].includes(latestSale.status)) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
   async function completePayment() {
     if (!token || isPreview) {
       setPaymentOpen(false);
@@ -378,34 +434,41 @@ export function PosPage() {
       return;
     }
 
-    if (paymentMethod !== "cash" && !paymentReference.trim()) {
-      setNotice("Enter the M-Pesa/card reference before confirming payment.");
+    if (paymentMethod === "mpesa" && !mpesaPhone.trim()) {
+      setNotice("Enter the customer's M-Pesa phone number before sending the prompt.");
+      return;
+    }
+
+    if (paymentMethod === "card" && !paymentReference.trim()) {
+      setNotice("Enter the card reference before confirming payment.");
       return;
     }
 
     setPaymentBusy(true);
     try {
-      const sale =
-        pendingSale ??
-        (await createPosSale(token, {
-          branch_id: user.branch_id,
-          till_session_id: tillSession.id,
-          channel: "pos",
-          notes: "Created from POS terminal",
-          items: cart.map((item) => ({
-            variant_id: item.variantId,
-            serialized_unit_id: item.serializedUnitId,
-            quantity: item.quantity,
-            discount_amount: 0,
-          })),
-        }));
+      const sale = await ensurePendingSale();
 
-      setPendingSale(sale);
+      if (paymentMethod === "mpesa") {
+        const prompt = await sendMpesaStkPush(token, sale.id, {
+          phone_number: mpesaPhone.trim(),
+          amount: sale.total_amount,
+          idempotency_key: idempotencyKey(),
+          notes: `POS M-Pesa payment for ${sale.invoice_number}`,
+        });
+        setNotice(prompt.customer_message);
+        const completed = await waitForMpesaCompletion(sale.id);
+        if (!completed) {
+          setNotice(
+            "M-Pesa prompt sent. Waiting for Safaricom callback; refresh recent sales once the customer completes payment.",
+          );
+        }
+        return;
+      }
+
       await addSalePayment(token, sale.id, {
         method: paymentMethod,
         amount: sale.total_amount,
-        provider_reference:
-          paymentMethod === "cash" ? null : paymentReference.trim(),
+        provider_reference: paymentMethod === "cash" ? null : paymentReference.trim(),
         idempotency_key: idempotencyKey(),
         notes: `POS ${paymentMethod} payment`,
       });
@@ -416,6 +479,7 @@ export function PosPage() {
       setCart([]);
       setPendingSale(null);
       setPaymentReference("");
+      setMpesaPhone("");
       setPaymentOpen(false);
       setNotice(`Sale ${officialReceipt.invoice_number} completed successfully.`);
       void refreshRecentSales();
@@ -989,13 +1053,23 @@ export function PosPage() {
                     </button>
                   ))}
                 </div>
-                {paymentMethod !== "cash" && paymentMethod !== "split" && (
+                {paymentMethod === "mpesa" && (
                   <label className="payment-reference">
-                    Payment reference
+                    Customer M-Pesa phone
+                    <input
+                      value={mpesaPhone}
+                      onChange={(event) => setMpesaPhone(event.target.value)}
+                      placeholder="0712 345 678 or 254712345678"
+                    />
+                  </label>
+                )}
+                {paymentMethod === "card" && (
+                  <label className="payment-reference">
+                    Card reference
                     <input
                       value={paymentReference}
                       onChange={(event) => setPaymentReference(event.target.value)}
-                      placeholder="M-Pesa code or card reference"
+                      placeholder="Card approval/reference number"
                     />
                   </label>
                 )}
@@ -1031,7 +1105,13 @@ export function PosPage() {
                   disabled={paymentBusy}
                   onClick={completePayment}
                 >
-                  {paymentBusy ? "Completing..." : "Confirm Payment"}
+                  {paymentBusy
+                    ? paymentMethod === "mpesa"
+                      ? "Waiting for M-Pesa..."
+                      : "Completing..."
+                    : paymentMethod === "mpesa"
+                      ? "Send M-Pesa Prompt"
+                      : "Confirm Payment"}
                 </button>
               </section>
             </div>

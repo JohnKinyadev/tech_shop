@@ -349,6 +349,97 @@ def _create_warranties(
         )
 
 
+def _complete_sale_if_fully_paid(
+    db: Session,
+    *,
+    sale: Sale,
+    actor_id: UUID,
+    now: datetime,
+) -> None:
+    if sale.paid_amount != sale.total_amount:
+        return
+
+    items = _items(db, sale.id, lock=True)
+    inventory.sell_stock(
+        db,
+        branch_id=sale.branch_id,
+        sale_id=sale.id,
+        items=items,
+        performed_by_id=actor_id,
+    )
+    _create_warranties(db, sale, items, now)
+    sale.status = SaleStatus.COMPLETED
+    sale.fulfillment_status = FulfillmentStatus.FULFILLED
+    sale.completed_at = now
+
+
+def complete_pending_payment(
+    db: Session,
+    payment: Payment,
+    *,
+    provider_reference: str | None,
+    provider_payload: dict | None,
+    paid_at: datetime | None = None,
+) -> PaymentResponse:
+    if payment.status == PaymentStatus.COMPLETED:
+        return PaymentResponse.model_validate(payment)
+    if payment.status != PaymentStatus.PENDING:
+        raise ConflictError("only pending payments can be completed")
+    if payment.sale_id is None:
+        raise ConflictError("payment is not linked to a sale")
+
+    sale = db.scalar(
+        select(Sale)
+        .where(Sale.id == payment.sale_id, Sale.is_deleted.is_(False))
+        .with_for_update()
+    )
+    if sale is None:
+        raise NotFoundError("sale not found")
+    if sale.status != SaleStatus.PENDING_PAYMENT:
+        raise ConflictError("this sale is not awaiting payment")
+    if provider_reference and provider_reference != payment.provider_reference:
+        duplicate = db.scalar(
+            select(Payment.id).where(
+                Payment.provider_reference == provider_reference,
+                Payment.id != payment.id,
+            )
+        )
+        if duplicate is not None:
+            raise ConflictError("payment provider reference is already in use")
+
+    now = paid_at or datetime.now(timezone.utc)
+    payment.status = PaymentStatus.COMPLETED
+    payment.provider_reference = provider_reference or payment.provider_reference
+    payment.provider_payload = {
+        **(payment.provider_payload or {}),
+        **(provider_payload or {}),
+    }
+    payment.paid_at = now
+
+    sale.paid_amount = money(sale.paid_amount + payment.amount)
+    if sale.paid_amount > sale.total_amount:
+        raise ValidationError("payment exceeds the outstanding sale amount")
+    if sale.cashier_id is None:
+        raise ConflictError("sale has no cashier to complete payment")
+    _complete_sale_if_fully_paid(
+        db,
+        sale=sale,
+        actor_id=sale.cashier_id,
+        now=now,
+    )
+    db.flush()
+    record_audit(
+        db,
+        actor_id=sale.cashier_id,
+        branch_id=sale.branch_id,
+        action="sale.payment_recorded",
+        resource_type="sale",
+        resource_id=sale.id,
+        after={"paid_amount": str(sale.paid_amount), "status": sale.status.value},
+    )
+    return PaymentResponse.model_validate(payment)
+
+
 def add_payment(
     db: Session,
     principal: AuthPrincipal,
@@ -396,19 +487,12 @@ def add_payment(
     )
     db.add(payment)
     sale.paid_amount = money(sale.paid_amount + payment.amount)
-    if sale.paid_amount == sale.total_amount:
-        items = _items(db, sale.id, lock=True)
-        inventory.sell_stock(
-            db,
-            branch_id=sale.branch_id,
-            sale_id=sale.id,
-            items=items,
-            performed_by_id=principal.user_id,
-        )
-        _create_warranties(db, sale, items, now)
-        sale.status = SaleStatus.COMPLETED
-        sale.fulfillment_status = FulfillmentStatus.FULFILLED
-        sale.completed_at = now
+    _complete_sale_if_fully_paid(
+        db,
+        sale=sale,
+        actor_id=principal.user_id,
+        now=now,
+    )
     db.flush()
     record_audit(
         db,
