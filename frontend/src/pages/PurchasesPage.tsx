@@ -26,8 +26,18 @@ type VariantOption = {
   id: string;
   label: string;
   sku: string;
-  trackingType: string;
+  trackingType: "bulk" | "serial" | "imei";
   price: number;
+};
+
+type PurchaseDraftLine = {
+  variantId: string;
+  label: string;
+  sku: string;
+  trackingType: VariantOption["trackingType"];
+  orderedQuantity: number;
+  unitCost: number;
+  taxRate: number;
 };
 
 const emptySupplierForm = {
@@ -96,6 +106,56 @@ function orderUnits(order: PurchaseOrder) {
   );
 }
 
+function lineTotal(quantity: number, unitCost: number, taxRate: number) {
+  const subtotal = quantity * unitCost;
+  return subtotal + subtotal * (taxRate / 100);
+}
+
+function duplicateIdentifier(values: string[], caseSensitive = false) {
+  const normalized = values.map((value) =>
+    caseSensitive ? value : value.toLowerCase(),
+  );
+  return new Set(normalized).size !== normalized.length;
+}
+
+function receiptIdentifierIssue(
+  trackingType: VariantOption["trackingType"] | undefined,
+  quantity: number,
+  serialNumbers: string[],
+  imeis: string[],
+) {
+  if (!trackingType || !quantity || quantity <= 0) return null;
+  if (duplicateIdentifier(serialNumbers)) {
+    return "Serial numbers cannot be repeated in the same receipt.";
+  }
+  if (duplicateIdentifier(imeis, true)) {
+    return "IMEI numbers cannot be repeated in the same receipt.";
+  }
+  if (imeis.some((imei) => !/^\d{15}$/.test(imei))) {
+    return "Every IMEI must contain exactly 15 digits.";
+  }
+  if (trackingType === "bulk" && (serialNumbers.length || imeis.length)) {
+    return "Bulk items should be received by quantity only. Remove serial or IMEI values.";
+  }
+  if (trackingType === "serial") {
+    if (serialNumbers.length !== quantity) {
+      return `Serialized stock needs ${quantity} serial number(s).`;
+    }
+    if (imeis.length && imeis.length !== quantity) {
+      return `Optional IMEIs must also be ${quantity} value(s), or left blank.`;
+    }
+  }
+  if (trackingType === "imei") {
+    if (imeis.length !== quantity) {
+      return `Phone/IMEI stock needs ${quantity} IMEI number(s).`;
+    }
+    if (serialNumbers.length && serialNumbers.length !== quantity) {
+      return `Optional serial numbers must also be ${quantity} value(s), or left blank.`;
+    }
+  }
+  return null;
+}
+
 export function PurchasesPage() {
   const { token, isPreview, user } = useAuth();
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
@@ -108,9 +168,10 @@ export function PurchasesPage() {
   const [selectedOrderId, setSelectedOrderId] = useState(
     demoPurchaseOrders[0]?.id ?? "",
   );
-  const [productSearch, setProductSearch] = useState("demo");
+  const [productSearch, setProductSearch] = useState("");
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
+  const [purchaseLines, setPurchaseLines] = useState<PurchaseDraftLine[]>([]);
   const [receiptForm, setReceiptForm] = useState(emptyReceiptForm);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -152,6 +213,7 @@ export function PurchasesPage() {
     () => new Map(variantOptions.map((variant) => [variant.id, variant])),
     [variantOptions],
   );
+  const selectedPurchaseVariant = variantById.get(purchaseForm.variant_id);
 
   const selectedOrder = useMemo(
     () => orders.find((order) => order.id === selectedOrderId) ?? orders[0],
@@ -164,6 +226,40 @@ export function PurchasesPage() {
         (item) => item.ordered_quantity > item.received_quantity,
       ) ?? [],
     [selectedOrder],
+  );
+  const selectedReceiptItem = useMemo(
+    () =>
+      receivableItems.find(
+        (item) => item.id === receiptForm.purchase_order_item_id,
+      ),
+    [receivableItems, receiptForm.purchase_order_item_id],
+  );
+  const selectedReceiptVariant = selectedReceiptItem
+    ? variantById.get(selectedReceiptItem.variant_id)
+    : undefined;
+  const receiptQuantity = Number(receiptForm.quantity);
+  const receiptSerialNumbers = useMemo(
+    () => splitIdentifiers(receiptForm.serial_numbers),
+    [receiptForm.serial_numbers],
+  );
+  const receiptImeis = useMemo(
+    () => splitIdentifiers(receiptForm.imeis),
+    [receiptForm.imeis],
+  );
+  const receiptIssue = receiptIdentifierIssue(
+    selectedReceiptVariant?.trackingType,
+    receiptQuantity,
+    receiptSerialNumbers,
+    receiptImeis,
+  );
+  const draftSubtotal = purchaseLines.reduce(
+    (sum, line) => sum + line.orderedQuantity * line.unitCost,
+    0,
+  );
+  const draftTotal = purchaseLines.reduce(
+    (sum, line) =>
+      sum + lineTotal(line.orderedQuantity, line.unitCost, line.taxRate),
+    0,
   );
 
   const totalOrdered = orders.reduce(
@@ -231,7 +327,7 @@ export function PurchasesPage() {
     if (!token || isPreview) return;
 
     let active = true;
-    listCatalogProducts(token, productSearch || "demo")
+    listCatalogProducts(token, productSearch)
       .then((result) => {
         if (!active) return;
         setCatalogProducts(result.items);
@@ -297,6 +393,8 @@ export function PurchasesPage() {
       ...current,
       purchase_order_item_id: firstReceivable?.id ?? "",
       quantity: "1",
+      serial_numbers: "",
+      imeis: "",
     }));
   }
 
@@ -356,12 +454,78 @@ export function PurchasesPage() {
     }
   }
 
-  async function handleCreatePurchaseOrder(event: FormEvent) {
-    event.preventDefault();
+  function buildDraftLineFromForm() {
     const selectedVariant = variantById.get(purchaseForm.variant_id);
     const orderedQuantity = Number(purchaseForm.ordered_quantity);
     const unitCost = Number(purchaseForm.unit_cost);
     const taxRate = Number(purchaseForm.tax_rate || 0);
+
+    if (!purchaseForm.variant_id || !selectedVariant) {
+      return { error: "Select a product variant for this purchase order." };
+    }
+    if (!orderedQuantity || orderedQuantity <= 0) {
+      return { error: "Quantity must be at least 1." };
+    }
+    if (Number.isNaN(unitCost) || unitCost < 0) {
+      return { error: "Unit cost must be a valid number." };
+    }
+    if (Number.isNaN(taxRate) || taxRate < 0 || taxRate > 100) {
+      return { error: "Tax rate must be between 0 and 100." };
+    }
+
+    return {
+      line: {
+        variantId: selectedVariant.id,
+        label: selectedVariant.label,
+        sku: selectedVariant.sku,
+        trackingType: selectedVariant.trackingType,
+        orderedQuantity,
+        unitCost,
+        taxRate,
+      } satisfies PurchaseDraftLine,
+    };
+  }
+
+  function handleAddPurchaseLine() {
+    const draft = buildDraftLineFromForm();
+    if (draft.error || !draft.line) {
+      setNotice(draft.error ?? "Could not add item line.");
+      return;
+    }
+
+    const addedVariant = variantById.get(draft.line.variantId);
+
+    setPurchaseLines((current) => {
+      const existing = current.find(
+        (line) => line.variantId === draft.line.variantId,
+      );
+      if (!existing) return [...current, draft.line];
+
+      return current.map((line) =>
+        line.variantId === draft.line.variantId
+          ? {
+              ...draft.line,
+              orderedQuantity: line.orderedQuantity + draft.line.orderedQuantity,
+            }
+          : line,
+      );
+    });
+    setPurchaseForm((current) => ({
+      ...current,
+      ordered_quantity: "1",
+      unit_cost: current.unit_cost || estimateUnitCost(addedVariant),
+    }));
+    setNotice(`${draft.line.label} added to this order.`);
+  }
+
+  function removePurchaseLine(variantId: string) {
+    setPurchaseLines((current) =>
+      current.filter((line) => line.variantId !== variantId),
+    );
+  }
+
+  async function handleCreatePurchaseOrder(event: FormEvent) {
+    event.preventDefault();
 
     if (!selectedBranchId) {
       setNotice("Select a branch before creating a purchase order.");
@@ -371,20 +535,30 @@ export function PurchasesPage() {
       setNotice("Select or create a supplier first.");
       return;
     }
-    if (!purchaseForm.variant_id || !selectedVariant) {
-      setNotice("Select a product variant for this purchase order.");
-      return;
-    }
-    if (!orderedQuantity || orderedQuantity <= 0 || !unitCost || unitCost < 0) {
-      setNotice("Quantity and unit cost must be valid numbers.");
-      return;
+
+    let orderLines = purchaseLines;
+    if (!orderLines.length) {
+      const draft = buildDraftLineFromForm();
+      if (draft.error || !draft.line) {
+        setNotice(draft.error ?? "Add at least one item to this purchase order.");
+        return;
+      }
+      orderLines = [draft.line];
     }
 
     setBusy(true);
     try {
       if (!token || isPreview) {
-        const subtotal = orderedQuantity * unitCost;
-        const taxAmount = subtotal * (taxRate / 100);
+        const subtotal = orderLines.reduce(
+          (sum, line) => sum + line.orderedQuantity * line.unitCost,
+          0,
+        );
+        const total = orderLines.reduce(
+          (sum, line) =>
+            sum + lineTotal(line.orderedQuantity, line.unitCost, line.taxRate),
+          0,
+        );
+        const taxAmount = total - subtotal;
         const order: PurchaseOrder = {
           id: `preview-po-${Date.now()}`,
           created_at: new Date().toISOString(),
@@ -400,22 +574,23 @@ export function PurchasesPage() {
           subtotal: String(subtotal),
           tax_amount: String(taxAmount),
           discount_amount: "0",
-          total_amount: String(subtotal + taxAmount),
+          total_amount: String(total),
           notes: purchaseForm.notes || null,
-          items: [
-            {
-              id: `preview-po-item-${Date.now()}`,
-              variant_id: purchaseForm.variant_id,
-              ordered_quantity: orderedQuantity,
-              received_quantity: 0,
-              unit_cost: String(unitCost),
-              tax_rate: String(taxRate),
-              line_total: String(subtotal + taxAmount),
-            },
-          ],
+          items: orderLines.map((line, index) => ({
+            id: `preview-po-item-${Date.now()}-${index}`,
+            variant_id: line.variantId,
+            ordered_quantity: line.orderedQuantity,
+            received_quantity: 0,
+            unit_cost: String(line.unitCost),
+            tax_rate: String(line.taxRate),
+            line_total: String(
+              lineTotal(line.orderedQuantity, line.unitCost, line.taxRate),
+            ),
+          })),
         };
         setOrders((current) => [order, ...current]);
         setSelectedOrderId(order.id);
+        setPurchaseLines([]);
         setPurchaseForm((current) => ({
           ...emptyPurchaseForm,
           supplier_id: current.supplier_id,
@@ -432,17 +607,16 @@ export function PurchasesPage() {
         supplier_reference: purchaseForm.supplier_reference || null,
         expected_at: optionalDateTime(purchaseForm.expected_at),
         notes: purchaseForm.notes || null,
-        items: [
-          {
-            variant_id: purchaseForm.variant_id,
-            ordered_quantity: orderedQuantity,
-            unit_cost: unitCost,
-            tax_rate: taxRate,
-          },
-        ],
+        items: orderLines.map((line) => ({
+          variant_id: line.variantId,
+          ordered_quantity: line.orderedQuantity,
+          unit_cost: line.unitCost,
+          tax_rate: line.taxRate,
+        })),
       });
       setOrders((current) => [order, ...current]);
       setSelectedOrderId(order.id);
+      setPurchaseLines([]);
       setPurchaseForm((current) => ({
         ...emptyPurchaseForm,
         supplier_id: current.supplier_id,
@@ -522,6 +696,10 @@ export function PurchasesPage() {
     const remaining = selectedItem.ordered_quantity - selectedItem.received_quantity;
     if (!quantity || quantity <= 0 || quantity > remaining) {
       setNotice(`Receipt quantity must be between 1 and ${remaining}.`);
+      return;
+    }
+    if (receiptIssue) {
+      setNotice(receiptIssue);
       return;
     }
 
@@ -758,6 +936,89 @@ export function PurchasesPage() {
               </label>
             </div>
 
+            <div className="purchase-line-builder">
+              <div>
+                <strong>
+                  {selectedPurchaseVariant
+                    ? titleize(selectedPurchaseVariant.trackingType)
+                    : "No"}{" "}
+                  tracking
+                </strong>
+                <span>
+                  Add each product line to this order before creating the PO.
+                  Serialized and IMEI items will ask for identifiers during receiving.
+                </span>
+              </div>
+              <button
+                className="secondary-button"
+                type="button"
+                disabled={busy || !purchaseForm.variant_id}
+                onClick={handleAddPurchaseLine}
+              >
+                Add Item to Order
+              </button>
+            </div>
+
+            {purchaseLines.length ? (
+              <div className="purchase-draft-card">
+                <div className="purchase-draft-card__summary">
+                  <strong>{purchaseLines.length} line(s) ready</strong>
+                  <span>
+                    Subtotal {money(draftSubtotal)} · Estimated total{" "}
+                    {money(draftTotal)}
+                  </span>
+                </div>
+                <table className="data-table data-table--compact">
+                  <thead>
+                    <tr>
+                      <th>Item</th>
+                      <th>Tracking</th>
+                      <th>Qty</th>
+                      <th>Cost</th>
+                      <th>Total</th>
+                      <th></th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {purchaseLines.map((line) => (
+                      <tr key={line.variantId}>
+                        <td>
+                          <strong>{line.label}</strong>
+                          <span>{line.sku}</span>
+                        </td>
+                        <td>{titleize(line.trackingType)}</td>
+                        <td>{integer(line.orderedQuantity)}</td>
+                        <td>{money(line.unitCost)}</td>
+                        <td>
+                          {money(
+                            lineTotal(
+                              line.orderedQuantity,
+                              line.unitCost,
+                              line.taxRate,
+                            ),
+                          )}
+                        </td>
+                        <td>
+                          <button
+                            className="ghost-button"
+                            type="button"
+                            onClick={() => removePurchaseLine(line.variantId)}
+                          >
+                            Remove
+                          </button>
+                        </td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            ) : (
+              <p className="muted purchase-empty-note">
+                No lines added yet. If you click Create Purchase Order now, the
+                currently selected product will be used as the first line.
+              </p>
+            )}
+
             <label>
               Notes
               <textarea
@@ -911,6 +1172,8 @@ export function PurchasesPage() {
                         setReceiptForm((current) => ({
                           ...current,
                           purchase_order_item_id: event.target.value,
+                          serial_numbers: "",
+                          imeis: "",
                         }))
                       }
                     >
@@ -927,12 +1190,46 @@ export function PurchasesPage() {
                     </select>
                   </label>
 
+                  {selectedReceiptItem && (
+                    <div className="receipt-tracking-card">
+                      <div>
+                        <span>Selected line</span>
+                        <strong>
+                          {variantLabel(selectedReceiptItem.variant_id)}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Tracking</span>
+                        <strong>
+                          {selectedReceiptVariant
+                            ? titleize(selectedReceiptVariant.trackingType)
+                            : "Unknown"}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>Remaining</span>
+                        <strong>
+                          {integer(
+                            selectedReceiptItem.ordered_quantity -
+                              selectedReceiptItem.received_quantity,
+                          )}
+                        </strong>
+                      </div>
+                    </div>
+                  )}
+
                   <div className="form-grid form-grid--two">
                     <label>
                       Quantity
                       <input
                         type="number"
                         min="1"
+                        max={
+                          selectedReceiptItem
+                            ? selectedReceiptItem.ordered_quantity -
+                              selectedReceiptItem.received_quantity
+                            : undefined
+                        }
                         value={receiptForm.quantity}
                         onChange={(event) =>
                           setReceiptForm((current) => ({
@@ -957,32 +1254,99 @@ export function PurchasesPage() {
                     </label>
                   </div>
 
-                  <label>
-                    Serial numbers
-                    <textarea
-                      value={receiptForm.serial_numbers}
-                      onChange={(event) =>
-                        setReceiptForm((current) => ({
-                          ...current,
-                          serial_numbers: event.target.value,
-                        }))
+                  <div className="receipt-helper-card">
+                    {selectedReceiptVariant?.trackingType === "bulk" ? (
+                      <span>
+                        Bulk stock only needs the received quantity. Serial and
+                        IMEI fields stay hidden so accessories remain quick to
+                        receive.
+                      </span>
+                    ) : selectedReceiptVariant?.trackingType === "serial" ? (
+                      <span>
+                        Enter one serial number per unit. IMEIs are optional
+                        here, but if entered they must also match the quantity.
+                      </span>
+                    ) : selectedReceiptVariant?.trackingType === "imei" ? (
+                      <span>
+                        Enter one 15-digit IMEI per phone. Serial numbers are
+                        optional if the supplier also provides them.
+                      </span>
+                    ) : (
+                      <span>
+                        Select a pending line to see the exact receiving fields
+                        required for that product.
+                      </span>
+                    )}
+                  </div>
+
+                  {selectedReceiptVariant &&
+                    selectedReceiptVariant.trackingType !== "bulk" && (
+                    <div
+                      className={
+                        selectedReceiptVariant?.trackingType === "serial" ||
+                        selectedReceiptVariant?.trackingType === "imei"
+                          ? "receipt-identifier-grid"
+                          : "receipt-identifier-grid receipt-identifier-grid--single"
                       }
-                      placeholder="One per line for serialized devices"
-                    />
-                  </label>
-                  <label>
-                    IMEIs
-                    <textarea
-                      value={receiptForm.imeis}
-                      onChange={(event) =>
-                        setReceiptForm((current) => ({
-                          ...current,
-                          imeis: event.target.value,
-                        }))
-                      }
-                      placeholder="One per line for phones"
-                    />
-                  </label>
+                    >
+                      {(selectedReceiptVariant?.trackingType === "serial" ||
+                        selectedReceiptVariant?.trackingType === "imei") && (
+                        <label>
+                          Serial numbers
+                          <textarea
+                            value={receiptForm.serial_numbers}
+                            onChange={(event) =>
+                              setReceiptForm((current) => ({
+                                ...current,
+                                serial_numbers: event.target.value,
+                              }))
+                            }
+                            placeholder={
+                              selectedReceiptVariant?.trackingType === "serial"
+                                ? "Required · one per line"
+                                : "Optional · one per line"
+                            }
+                          />
+                          <span>
+                            {integer(receiptSerialNumbers.length)} /{" "}
+                            {integer(receiptQuantity || 0)} captured
+                          </span>
+                        </label>
+                      )}
+
+                      {(selectedReceiptVariant?.trackingType === "serial" ||
+                        selectedReceiptVariant?.trackingType === "imei") && (
+                        <label>
+                          IMEIs
+                          <textarea
+                            value={receiptForm.imeis}
+                            onChange={(event) =>
+                              setReceiptForm((current) => ({
+                                ...current,
+                                imeis: event.target.value,
+                              }))
+                            }
+                            placeholder={
+                              selectedReceiptVariant?.trackingType === "imei"
+                                ? "Required · 15 digits each"
+                                : "Optional · 15 digits each"
+                            }
+                          />
+                          <span>
+                            {integer(receiptImeis.length)} /{" "}
+                            {integer(receiptQuantity || 0)} captured
+                          </span>
+                        </label>
+                      )}
+                    </div>
+                    )}
+
+                  {receiptIssue && (
+                    <div className="notice receipt-inline-notice">
+                      {receiptIssue}
+                    </div>
+                  )}
+
                   <label>
                     Receipt notes
                     <textarea
@@ -1000,6 +1364,7 @@ export function PurchasesPage() {
                     className="primary-button"
                     disabled={
                       busy ||
+                      Boolean(receiptIssue) ||
                       !["approved", "partially_received"].includes(selectedOrder.status)
                     }
                   >
