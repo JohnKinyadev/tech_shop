@@ -5,6 +5,8 @@ import type {
   Brand,
   BrandCreatePayload,
   Branch,
+  BranchCreatePayload,
+  BranchUpdatePayload,
   CatalogProduct,
   Category,
   CategoryCreatePayload,
@@ -54,9 +56,11 @@ import type {
   Supplier,
   SupplierCreatePayload,
   Till,
+  TillCreatePayload,
   TillSession,
   TillSessionClosePayload,
   TillSessionOpenPayload,
+  TillUpdatePayload,
   TokenPair,
 } from "./types";
 
@@ -249,10 +253,26 @@ export function currentTillSession(token: string) {
   return apiRequest<TillSession>("/pos/till-sessions/current", { token });
 }
 
-export function listTills(token: string, branchId: string) {
+export function listTills(token: string, branchId: string, includeInactive = false) {
   return apiRequest<Till[]>("/pos/tills", {
     token,
-    query: { branch_id: branchId },
+    query: { branch_id: branchId, include_inactive: includeInactive },
+  });
+}
+
+export function createTill(token: string, body: TillCreatePayload) {
+  return apiRequest<Till>("/pos/tills", {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function updateTill(token: string, tillId: string, body: TillUpdatePayload) {
+  return apiRequest<Till>(`/pos/tills/${tillId}`, {
+    token,
+    method: "PATCH",
+    body,
   });
 }
 
@@ -309,6 +329,26 @@ export function listPosSales(token: string, branchId: string) {
 
 export function listBranches(token: string) {
   return apiRequest<Branch[]>("/branches", { token });
+}
+
+export function createBranch(token: string, body: BranchCreatePayload) {
+  return apiRequest<Branch>("/branches", {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function updateBranch(
+  token: string,
+  branchId: string,
+  body: BranchUpdatePayload,
+) {
+  return apiRequest<Branch>(`/branches/${branchId}`, {
+    token,
+    method: "PATCH",
+    body,
+  });
 }
 
 export function listCustomers(token: string, query = "") {

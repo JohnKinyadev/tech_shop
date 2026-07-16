@@ -1368,6 +1368,79 @@ button:disabled {
   font-size: 18px;
 }
 
+.settings-page {
+  padding-bottom: 24px;
+}
+
+.settings-desk {
+  display: grid;
+  grid-template-columns: minmax(0, 0.95fr) minmax(280px, 0.75fr) minmax(320px, 0.8fr);
+  gap: 15px;
+  align-items: stretch;
+}
+
+.settings-branch-card,
+.settings-checklist,
+.settings-till-list {
+  display: grid;
+  gap: 9px;
+  padding: 12px;
+}
+
+.settings-branch-card > div,
+.settings-checklist article,
+.settings-till-list button {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.settings-branch-card span,
+.settings-branch-card div span,
+.settings-checklist span,
+.settings-till-list span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.settings-checklist article {
+  grid-template-columns: auto minmax(0, 1fr);
+  align-items: start;
+}
+
+.settings-till-list {
+  max-height: 260px;
+  overflow: auto;
+}
+
+.settings-till-list button {
+  width: 100%;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.settings-till-list button:hover,
+.settings-till-list button.is-selected {
+  border-color: #b9d8f0;
+  background: #f4f9fd;
+}
+
+.settings-checkbox {
+  display: flex !important;
+  grid-template-columns: none !important;
+  gap: 8px !important;
+  align-items: center;
+}
+
+.settings-checkbox input {
+  width: auto;
+  height: auto;
+}
+
 .inventory-desk {
   display: grid;
   grid-template-columns: minmax(0, 1.05fr) minmax(260px, 0.65fr) minmax(320px, 0.8fr);

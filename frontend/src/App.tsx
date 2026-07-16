@@ -10,6 +10,7 @@ import { PurchasesPage } from "./pages/PurchasesPage";
 import { RepairsPage } from "./pages/RepairsPage";
 import { ReportsPage } from "./pages/ReportsPage";
 import { RoleStudioPage } from "./pages/RoleStudioPage";
+import { SettingsPage } from "./pages/SettingsPage";
 import { useAuth } from "./state/auth";
 
 export function App() {
@@ -29,6 +30,7 @@ export function App() {
     if (activeView === "purchases") return <PurchasesPage />;
     if (activeView === "reports") return <ReportsPage />;
     if (activeView === "roles") return <RoleStudioPage />;
+    if (activeView === "settings") return <SettingsPage />;
     return <DashboardPage onNavigate={setActiveView} />;
   }
 

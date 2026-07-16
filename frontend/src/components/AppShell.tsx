@@ -12,7 +12,8 @@ export type AppView =
   | "repairs"
   | "purchases"
   | "reports"
-  | "roles";
+  | "roles"
+  | "settings";
 
 type AppShellProps = {
   activeView: AppView;
@@ -29,6 +30,7 @@ const navItems: Array<{ key: AppView; label: string }> = [
   { key: "purchases", label: "Purchases" },
   { key: "reports", label: "Reports" },
   { key: "roles", label: "Staff & Roles" },
+  { key: "settings", label: "Settings" },
 ];
 
 export function AppShell({ activeView, onViewChange, children }: AppShellProps) {

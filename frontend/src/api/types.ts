@@ -169,6 +169,17 @@ export type Till = ModelResponse & {
   is_active: boolean;
 };
 
+export type TillCreatePayload = {
+  branch_id: UUID;
+  name: string;
+  code: string;
+};
+
+export type TillUpdatePayload = {
+  name?: string;
+  is_active?: boolean;
+};
+
 export type TillSessionOpenPayload = {
   till_id: UUID;
   opening_float: string | number;
@@ -680,6 +691,27 @@ export type Branch = ModelResponse & {
   country: string;
   is_headquarters: boolean;
   status: string;
+};
+
+export type BranchCreatePayload = {
+  name: string;
+  code: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string;
+  is_headquarters?: boolean;
+};
+
+export type BranchUpdatePayload = {
+  name?: string;
+  phone?: string | null;
+  email?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string;
+  status?: string;
 };
 
 export type Customer = ModelResponse & {
