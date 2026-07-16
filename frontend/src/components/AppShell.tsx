@@ -11,6 +11,7 @@ export type AppView =
   | "inventory"
   | "repairs"
   | "purchases"
+  | "expenses"
   | "reports"
   | "roles"
   | "settings";
@@ -28,6 +29,7 @@ const navItems: Array<{ key: AppView; label: string }> = [
   { key: "inventory", label: "Inventory" },
   { key: "repairs", label: "Repairs" },
   { key: "purchases", label: "Purchases" },
+  { key: "expenses", label: "Expenses" },
   { key: "reports", label: "Reports" },
   { key: "roles", label: "Staff & Roles" },
   { key: "settings", label: "Settings" },

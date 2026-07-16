@@ -14,7 +14,14 @@ import type {
   Customer,
   CustomerCreatePayload,
   DashboardSummary,
+  Expense,
+  ExpenseCategory,
+  ExpenseCategoryCreatePayload,
+  ExpenseCategoryUpdatePayload,
+  ExpenseCreatePayload,
+  ExpenseDecisionPayload,
   ExpenseSummary,
+  ExpenseUpdatePayload,
   GoodsReceipt,
   GoodsReceiptPayload,
   InventoryBalance,
@@ -411,6 +418,87 @@ export function expenseSummary(token: string, options: ReportQueryOptions = {}) 
   return apiRequest<ExpenseSummary>("/reports/expenses", {
     token,
     query: reportQuery(options),
+  });
+}
+
+export function listExpenseCategories(token: string) {
+  return apiRequest<ExpenseCategory[]>("/expenses/categories", { token });
+}
+
+export function createExpenseCategory(
+  token: string,
+  body: ExpenseCategoryCreatePayload,
+) {
+  return apiRequest<ExpenseCategory>("/expenses/categories", {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function updateExpenseCategory(
+  token: string,
+  categoryId: string,
+  body: ExpenseCategoryUpdatePayload,
+) {
+  return apiRequest<ExpenseCategory>(`/expenses/categories/${categoryId}`, {
+    token,
+    method: "PATCH",
+    body,
+  });
+}
+
+export function listExpenses(
+  token: string,
+  options: {
+    branchId?: string;
+    status?: string;
+    categoryId?: string;
+    pageSize?: number;
+  } = {},
+) {
+  return apiRequest<Page<Expense>>("/expenses", {
+    token,
+    query: {
+      branch_id: options.branchId,
+      status: options.status === "all" ? undefined : options.status,
+      category_id: options.categoryId === "all" ? undefined : options.categoryId,
+      page: 1,
+      page_size: options.pageSize ?? 100,
+    },
+  });
+}
+
+export function createExpense(token: string, body: ExpenseCreatePayload) {
+  return apiRequest<Expense>("/expenses", {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function updateExpense(
+  token: string,
+  expenseId: string,
+  body: ExpenseUpdatePayload,
+) {
+  return apiRequest<Expense>(`/expenses/${expenseId}`, {
+    token,
+    method: "PATCH",
+    body,
+  });
+}
+
+export function decideExpense(
+  token: string,
+  expenseId: string,
+  action: "approve" | "reject" | "cancel",
+  body: ExpenseDecisionPayload,
+) {
+  return apiRequest<Expense>(`/expenses/${expenseId}/${action}`, {
+    token,
+    method: "POST",
+    body,
   });
 }
 

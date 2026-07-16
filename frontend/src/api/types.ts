@@ -383,6 +383,57 @@ export type ExpenseSummary = {
   }>;
 };
 
+export type ExpenseCategory = ModelResponse & {
+  name: string;
+  description: string | null;
+};
+
+export type ExpenseCategoryCreatePayload = {
+  name: string;
+  description?: string | null;
+};
+
+export type ExpenseCategoryUpdatePayload = {
+  name?: string;
+  description?: string | null;
+};
+
+export type Expense = ModelResponse & {
+  branch_id: UUID;
+  category_id: UUID;
+  submitted_by_id: UUID;
+  approved_by_id: UUID | null;
+  description: string;
+  amount: string;
+  payment_method: "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit";
+  status: string;
+  reference_number: string | null;
+  notes: string | null;
+};
+
+export type ExpenseCreatePayload = {
+  branch_id: UUID;
+  category_id: UUID;
+  description: string;
+  amount: string | number;
+  payment_method?: "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit";
+  reference_number?: string | null;
+  notes?: string | null;
+};
+
+export type ExpenseUpdatePayload = {
+  category_id?: UUID;
+  description?: string;
+  amount?: string | number;
+  payment_method?: "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit";
+  reference_number?: string | null;
+  notes?: string | null;
+};
+
+export type ExpenseDecisionPayload = {
+  notes?: string | null;
+};
+
 export type DashboardSummary = {
   sales: SalesSummary;
   inventory: InventorySummary;

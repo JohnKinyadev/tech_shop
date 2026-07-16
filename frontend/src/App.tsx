@@ -3,6 +3,7 @@ import { useState } from "react";
 import { AppShell, type AppView } from "./components/AppShell";
 import { CatalogPage } from "./pages/CatalogPage";
 import { DashboardPage } from "./pages/DashboardPage";
+import { ExpensesPage } from "./pages/ExpensesPage";
 import { InventoryPage } from "./pages/InventoryPage";
 import { LoginPage } from "./pages/LoginPage";
 import { PosPage } from "./pages/PosPage";
@@ -28,6 +29,7 @@ export function App() {
     if (activeView === "inventory") return <InventoryPage />;
     if (activeView === "repairs") return <RepairsPage />;
     if (activeView === "purchases") return <PurchasesPage />;
+    if (activeView === "expenses") return <ExpensesPage />;
     if (activeView === "reports") return <ReportsPage />;
     if (activeView === "roles") return <RoleStudioPage />;
     if (activeView === "settings") return <SettingsPage />;
