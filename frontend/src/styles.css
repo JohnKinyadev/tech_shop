@@ -70,6 +70,7 @@ button:disabled {
 .danger-button,
 .success-button,
 .order-actions button,
+.quick-payment-actions button,
 .order-keypad-actions button,
 .customer-strip button {
   border: 0;
@@ -2024,6 +2025,7 @@ button:disabled {
 }
 
 .order-keypad-actions button,
+.quick-payment-actions button,
 .order-actions button {
   min-height: 46px;
   border-radius: 0;
@@ -2036,6 +2038,26 @@ button:disabled {
 }
 
 .order-keypad-actions button:last-child {
+  border-right: 0;
+}
+
+.quick-payment-actions {
+  display: grid;
+  grid-template-columns: repeat(3, 1fr);
+  border-top: 1px solid var(--line);
+}
+
+.quick-payment-actions button {
+  color: #fff;
+  border-right: 1px solid rgba(255, 255, 255, 0.4);
+  background: var(--success);
+}
+
+.quick-payment-actions button:hover {
+  background: var(--success-dark);
+}
+
+.quick-payment-actions button:last-child {
   border-right: 0;
 }
 

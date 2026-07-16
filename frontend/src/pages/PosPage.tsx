@@ -355,6 +355,11 @@ export function PosPage() {
     setPaymentOpen(true);
   }
 
+  function openPaymentWithMethod(method: PaymentMethod) {
+    setPaymentMethod(method);
+    openPayment();
+  }
+
   async function completePayment() {
     if (!token || isPreview) {
       setPaymentOpen(false);
@@ -590,6 +595,12 @@ export function PosPage() {
             <button>Price</button>
             <button>Disc %</button>
             <button>Disc KES</button>
+          </div>
+
+          <div className="quick-payment-actions" aria-label="Quick payment methods">
+            <button onClick={() => openPaymentWithMethod("cash")}>Cash</button>
+            <button onClick={() => openPaymentWithMethod("mpesa")}>M-Pesa</button>
+            <button onClick={() => openPaymentWithMethod("card")}>Card</button>
           </div>
 
           <div className="order-actions">
