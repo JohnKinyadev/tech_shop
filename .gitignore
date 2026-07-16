@@ -2,8 +2,11 @@
 .venv/
 __pycache__/
 *.py[cod]
+*.tsbuildinfo
 .pytest_cache/
 .coverage
 htmlcov/
 dist/
 build/
+node_modules/
+frontend/dist/
