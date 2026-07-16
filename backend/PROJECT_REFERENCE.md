@@ -28,31 +28,34 @@ The OpenAPI schema is the exact source of truth for request/response field const
 http://127.0.0.1:8000/openapi.json
 ```
 
-## Demo data
+## Sample data
 
-The demo seed command is idempotent. It creates/reuses demo data across branches, staff,
+The sample seed command is idempotent. It creates/reuses sample data across branches, staff,
 catalog, purchasing, stock, POS, repairs, expenses, and reports.
 
 ```powershell
 .\.venv\Scripts\python.exe -m backend.cli.seed_demo
 ```
 
-Default password for all demo users:
+Default password for all seeded users:
 
 ```text
 DemoPass123!
 ```
 
-Demo users:
+Seeded staff users:
 
 | Role | Username | Main use |
 | --- | --- | --- |
-| Admin | `demo_admin` | Full access across branches |
-| Branch Manager | `demo_manager` | Branch operations, approvals, expenses |
-| Inventory Manager | `demo_inventory` | Purchasing, receiving, inventory work |
-| Technician | `demo_technician` | Assigned repair tickets |
-| Cashier | `demo_cashier` | POS sales, till, repair payments |
-| Accountant | `demo_accountant` | Read-only financial/reporting access |
+| Admin | `admin1` | Full access across branches |
+| Admin | `admin2` | Second owner/admin account |
+| Branch Manager | `manager1` | HQ branch operations, approvals, expenses |
+| Branch Manager | `manager2` | East branch operations, approvals, expenses |
+| Inventory Manager | `inventory1` | Purchasing, receiving, inventory work |
+| Technician | `technician1` | Assigned repair tickets |
+| Cashier | `cashier1` | HQ POS sales, till, repair payments |
+| Cashier | `cashier2` | East branch POS sales, till, repair payments |
+| Accountant | `accountant1` | Read-only financial/reporting access |
 
 Seeded records include:
 

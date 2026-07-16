@@ -2,7 +2,7 @@
 
 The backend is a modular FastAPI application backed by SQLAlchemy 2 and PostgreSQL.
 
-For the full backend map, endpoint table, demo users, schema locations, and file-by-file
+For the full backend map, endpoint table, seeded users, schema locations, and file-by-file
 reference, see [`PROJECT_REFERENCE.md`](./PROJECT_REFERENCE.md).
 
 System health checks:
@@ -52,14 +52,14 @@ python -m backend.cli.bootstrap_admin --full-name "Owner Name" --username owner 
   --email owner@example.com --branch-name "Main Branch" --branch-code HQ
 ```
 
-Seed demo data across the staff API with:
+Seed sample data across the staff API with:
 
 ```powershell
 python -m backend.cli.seed_demo
 ```
 
-The demo seed creates reusable branches, users, catalog items, stock, POS, repairs,
-expenses, and report data. Default demo password is `DemoPass123!`.
+The seed creates reusable branches, users, catalog items, stock, POS, repairs,
+expenses, and report data. Default seeded password is `DemoPass123!`.
 
 Run a read-only backend smoke check after seeding with:
 
