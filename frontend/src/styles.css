@@ -390,6 +390,8 @@ button:disabled {
 }
 
 .erp-workspace--pos {
+  height: calc(100vh - 111px);
+  overflow: hidden;
   padding: 0;
 }
 
@@ -1817,8 +1819,8 @@ button:disabled {
   position: relative;
   display: grid;
   grid-template-columns: 540px minmax(0, 1fr);
-  height: calc(100vh - 111px);
-  min-height: 690px;
+  height: 100%;
+  min-height: 0;
   overflow: hidden;
   background: var(--app-bg);
 }
@@ -1826,6 +1828,7 @@ button:disabled {
 .pos-order-panel {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr) auto;
+  min-height: 0;
   min-width: 0;
   border-right: 2px solid #fff;
   background: var(--app-bg);
@@ -1987,8 +1990,11 @@ button:disabled {
 }
 
 .order-footer {
+  position: relative;
+  z-index: 2;
   border-top: 2px solid var(--line-strong);
   background: #fff;
+  box-shadow: 0 -2px 8px rgba(33, 50, 66, 0.08);
 }
 
 .order-summary {
@@ -2074,6 +2080,7 @@ button:disabled {
 .pos-products-panel {
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
+  min-height: 0;
   min-width: 0;
   background: var(--app-bg);
 }
@@ -2701,11 +2708,88 @@ button:disabled {
 
 @media (max-width: 1280px) {
   .pos-terminal {
-    grid-template-columns: 500px minmax(0, 1fr);
+    grid-template-columns: minmax(440px, 480px) minmax(0, 1fr);
   }
 
   .payment-modal__body {
     grid-template-columns: minmax(0, 1fr) 360px;
+  }
+}
+
+@media (max-height: 760px) {
+  .order-tabs {
+    height: 46px;
+    padding-top: 4px;
+  }
+
+  .orders-tab {
+    height: 38px;
+    padding: 5px 9px;
+  }
+
+  .customer-strip {
+    padding: 8px 12px;
+  }
+
+  .order-summary {
+    padding: 9px 14px;
+  }
+
+  .order-summary div {
+    margin-bottom: 4px;
+  }
+
+  .order-summary__total {
+    margin-top: 6px;
+    padding-top: 7px;
+  }
+
+  .order-summary__total span,
+  .order-summary__total strong {
+    font-size: 18px;
+  }
+
+  .order-keypad-actions button,
+  .quick-payment-actions button,
+  .order-actions button {
+    min-height: 38px;
+  }
+
+  .pos-search-row {
+    padding: 8px;
+  }
+
+  .pos-search input {
+    height: 38px;
+    font-size: 14px;
+  }
+
+  .category-list {
+    padding: 0 8px 8px;
+  }
+
+  .category-list button {
+    min-height: 32px;
+    padding: 4px 10px;
+  }
+
+  .terminal-product-grid {
+    grid-template-columns: repeat(auto-fill, minmax(132px, 1fr));
+    gap: 7px;
+    padding: 8px;
+  }
+
+  .product-tile {
+    min-height: 160px;
+  }
+
+  .product-tile__media {
+    height: 68px;
+  }
+
+  .product-tile__body {
+    gap: 4px;
+    padding: 9px;
   }
 }
 
