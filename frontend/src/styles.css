@@ -659,7 +659,8 @@ button:disabled {
   font-weight: 700;
 }
 
-.table-search input {
+.table-search input,
+.table-search select {
   height: 34px;
   padding: 6px 10px;
   border: 1px solid var(--line);
@@ -987,6 +988,131 @@ button:disabled {
 
 .receipt-inline-notice {
   margin: 0;
+}
+
+.repair-desk {
+  display: grid;
+  grid-template-columns: minmax(0, 1.05fr) minmax(280px, 0.65fr) minmax(300px, 0.75fr);
+  gap: 15px;
+  align-items: stretch;
+}
+
+.repair-focus-card__body,
+.repair-customer-card,
+.repair-alert-list {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+}
+
+.repair-device-title,
+.repair-diagnosis-note,
+.repair-next-action,
+.repair-form-hint,
+.repair-intake-helper {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.repair-device-title span,
+.repair-focus-card__body p,
+.repair-diagnosis-note span,
+.repair-next-action span,
+.repair-customer-card span,
+.repair-customer-card div span,
+.repair-alert-list span,
+.repair-form-hint span,
+.repair-selected-meta small,
+.repair-intake-helper span,
+.repair-queue-table td span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.repair-focus-card__body p {
+  margin: 0;
+}
+
+.repair-mini-stats {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.repair-mini-stats span {
+  display: grid;
+  gap: 3px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfd;
+}
+
+.repair-mini-stats b {
+  color: var(--text);
+}
+
+.repair-customer-card div {
+  display: grid;
+  gap: 3px;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.repair-alert-list button {
+  display: grid;
+  gap: 4px;
+  width: 100%;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  text-align: left;
+  cursor: pointer;
+}
+
+.repair-alert-list button:hover {
+  border-color: #b9d8f0;
+  background: #f4f9fd;
+}
+
+.repair-selected-meta {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.repair-selected-meta small {
+  padding: 4px 7px;
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+}
+
+.repair-queue-tools {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 10px;
+  justify-content: flex-end;
+}
+
+.pipeline-column {
+  border: 0;
+  color: var(--text);
+  cursor: pointer;
+}
+
+.pipeline-column.is-active,
+.pipeline-column:hover {
+  outline: 2px solid var(--primary);
+  outline-offset: -2px;
 }
 
 .inventory-desk {
