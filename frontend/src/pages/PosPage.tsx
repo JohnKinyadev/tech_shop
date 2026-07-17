@@ -62,6 +62,8 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
+const mpesaPollSchedule = [1000, 1500, 1500, 2000, 2500, 3000, 4000, 5000];
+
 function unitLabel(unit?: SerializedUnit) {
   if (!unit) return "No unit selected";
   return unit.imei || unit.serial_number || unit.id;
@@ -454,9 +456,12 @@ export function PosPage() {
   async function waitForMpesaCompletion(saleId: string) {
     if (!token) return false;
 
-    for (let attempt = 0; attempt < 8; attempt += 1) {
-      setPaymentStatus(`M-Pesa prompt sent. Checking payment status ${attempt + 1}/8...`);
-      await wait(4000);
+    for (let attempt = 0; attempt < mpesaPollSchedule.length; attempt += 1) {
+      const delay = mpesaPollSchedule[attempt];
+      setPaymentStatus(
+        `M-Pesa prompt sent. Checking payment status ${attempt + 1}/${mpesaPollSchedule.length}...`,
+      );
+      await wait(delay);
       const latestSale = await getPosSale(token, saleId);
       if (latestSale.status === "completed") {
         await completeSaleReceipt(saleId, "M-Pesa payment received and receipt generated.");
