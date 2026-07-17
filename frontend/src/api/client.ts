@@ -25,6 +25,7 @@ import type {
   GoodsReceipt,
   GoodsReceiptPayload,
   InventoryBalance,
+  MpesaManualConfirmPayload,
   MpesaStkPushPayload,
   MpesaStkPushResponse,
   Page,
@@ -335,6 +336,18 @@ export function sendMpesaStkPush(
   body: MpesaStkPushPayload,
 ) {
   return apiRequest<MpesaStkPushResponse>(`/pos/sales/${saleId}/mpesa/stk-push`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function manuallyConfirmMpesaPayment(
+  token: string,
+  saleId: string,
+  body: MpesaManualConfirmPayload,
+) {
+  return apiRequest<Payment>(`/pos/sales/${saleId}/mpesa/manual-confirm`, {
     token,
     method: "POST",
     body,

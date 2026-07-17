@@ -18,6 +18,7 @@ from backend.models.enums import (
 from backend.models.payments import Payment
 from backend.models.sales import Sale
 from backend.schemas.payments_schemas import (
+    MpesaManualConfirmCreate,
     MpesaStkPushCreate,
     MpesaStkPushResponse,
     PaymentResponse,
@@ -25,7 +26,7 @@ from backend.schemas.payments_schemas import (
 from backend.services import sales
 from backend.services.audit import record_audit
 from backend.services.auth import AuthPrincipal
-from backend.services.exceptions import ConflictError, ValidationError
+from backend.services.exceptions import ConflictError, NotFoundError, ValidationError
 
 NAIROBI_TZ = ZoneInfo("Africa/Nairobi")
 
@@ -258,6 +259,57 @@ def _find_checkout_payment(db: Session, checkout_request_id: str) -> Payment | N
         )
         .with_for_update()
     )
+
+
+def manually_confirm_sale_payment(
+    db: Session,
+    principal: AuthPrincipal,
+    sale_id: UUID,
+    payload: MpesaManualConfirmCreate,
+) -> PaymentResponse:
+    sale = sales.get_sale_model(db, principal, sale_id, lock=True)
+    payment = db.scalar(
+        select(Payment)
+        .where(
+            Payment.sale_id == sale.id,
+            Payment.method == PaymentMethod.MPESA,
+            Payment.status == PaymentStatus.PENDING,
+            Payment.is_deleted.is_(False),
+        )
+        .order_by(Payment.created_at.desc())
+        .with_for_update()
+    )
+    if payment is None:
+        raise NotFoundError("no pending M-Pesa payment found for this sale")
+
+    now = datetime.now(timezone.utc)
+    provider_payload = {
+        **(payment.provider_payload or {}),
+        "manual_confirmation": True,
+        "manual_confirmed_by": str(principal.user_id),
+        "manual_confirmed_at": now.isoformat(),
+        "manual_notes": payload.notes,
+    }
+    completed = sales.complete_pending_payment(
+        db,
+        payment,
+        provider_reference=payload.provider_reference.strip().upper(),
+        provider_payload=provider_payload,
+        paid_at=now,
+    )
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=sale.branch_id,
+        action="mpesa.payment_manually_confirmed",
+        resource_type="payment",
+        resource_id=payment.id,
+        after={
+            "sale_id": str(sale.id),
+            "provider_reference": completed.provider_reference,
+        },
+    )
+    return completed
 
 
 def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:

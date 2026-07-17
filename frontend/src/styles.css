@@ -2824,6 +2824,45 @@ button:disabled {
   outline: none;
 }
 
+.manual-mpesa-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid #b6d7f5;
+  border-radius: var(--radius);
+  background: #eef7ff;
+}
+
+.manual-mpesa-panel div,
+.manual-mpesa-panel label {
+  display: grid;
+  gap: 5px;
+}
+
+.manual-mpesa-panel span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.manual-mpesa-panel input {
+  height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  outline: none;
+}
+
+.manual-mpesa-panel button {
+  min-height: 40px;
+  color: #fff;
+  border: 0;
+  border-radius: var(--radius);
+  background: var(--primary);
+  font-weight: 800;
+}
+
 .payment-table {
   width: 100%;
   border-collapse: collapse;

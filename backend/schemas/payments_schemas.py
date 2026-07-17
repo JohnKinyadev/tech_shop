@@ -65,3 +65,8 @@ class MpesaStkPushResponse(BaseSchema):
     merchant_request_id: str
     checkout_request_id: str
     customer_message: str
+
+
+class MpesaManualConfirmCreate(BaseSchema):
+    provider_reference: str = Field(min_length=5, max_length=150)
+    notes: str | None = Field(default=None, max_length=500)

@@ -266,6 +266,11 @@ export type MpesaStkPushPayload = {
   notes?: string | null;
 };
 
+export type MpesaManualConfirmPayload = {
+  provider_reference: string;
+  notes?: string | null;
+};
+
 export type Payment = ModelResponse & {
   branch_id: UUID;
   sale_id: UUID | null;

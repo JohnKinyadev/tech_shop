@@ -14,6 +14,7 @@ import {
   listPosSales,
   listSerializedUnits,
   listTills,
+  manuallyConfirmMpesaPayment,
   openTillSession,
   sendMpesaStkPush,
 } from "../api/client";
@@ -62,7 +63,9 @@ function wait(ms: number) {
   return new Promise((resolve) => window.setTimeout(resolve, ms));
 }
 
-const mpesaPollSchedule = [1000, 1500, 1500, 2000, 2500, 3000, 4000, 5000];
+const mpesaPollSchedule = [
+  1000, 1500, 1500, 2000, 2500, 3000, 4000, 5000, 7000, 10000, 10000,
+];
 
 function unitLabel(unit?: SerializedUnit) {
   if (!unit) return "No unit selected";
@@ -119,6 +122,7 @@ export function PosPage() {
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentReference, setPaymentReference] = useState("");
   const [mpesaPhone, setMpesaPhone] = useState("");
+  const [mpesaReceiptCode, setMpesaReceiptCode] = useState("");
   const [splitAmounts, setSplitAmounts] = useState<Record<SplitMethod, string>>({
     cash: "",
     mpesa: "",
@@ -444,6 +448,7 @@ export function PosPage() {
     setPendingSale(null);
     setPaymentReference("");
     setMpesaPhone("");
+    setMpesaReceiptCode("");
     setSplitAmounts({ cash: "", mpesa: "", card: "" });
     setSplitCardReference("");
     setPaymentStatus(null);
@@ -473,6 +478,48 @@ export function PosPage() {
     }
 
     return false;
+  }
+
+  async function manuallyCompleteMpesaPayment() {
+    if (!token || !pendingSale) {
+      setNotice("No pending M-Pesa sale is available to confirm.");
+      return;
+    }
+    if (!mpesaReceiptCode.trim()) {
+      setNotice("Enter the M-Pesa receipt code from the customer's SMS.");
+      return;
+    }
+
+    setPaymentBusy(true);
+    setPaymentStatus("Confirming M-Pesa receipt code...");
+    try {
+      const latestSale = await getPosSale(token, pendingSale.id);
+      if (latestSale.status === "completed") {
+        await completeSaleReceipt(
+          pendingSale.id,
+          "M-Pesa callback was received. Receipt generated.",
+        );
+        return;
+      }
+
+      await manuallyConfirmMpesaPayment(token, pendingSale.id, {
+        provider_reference: mpesaReceiptCode.trim(),
+        notes: "Cashier confirmed delayed M-Pesa callback from customer SMS.",
+      });
+      await completeSaleReceipt(
+        pendingSale.id,
+        "M-Pesa payment manually confirmed and receipt generated.",
+      );
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Could not confirm M-Pesa payment.",
+      );
+      setPaymentStatus(
+        error instanceof Error ? error.message : "Could not confirm M-Pesa payment.",
+      );
+    } finally {
+      setPaymentBusy(false);
+    }
   }
 
   async function recordImmediatePayment(
@@ -1350,6 +1397,34 @@ export function PosPage() {
                     />
                   </label>
                 )}
+                {pendingSale &&
+                  (paymentMethod === "mpesa" ||
+                    (paymentMethod === "split" && splitMpesaAmount > 0)) && (
+                    <section className="manual-mpesa-panel">
+                      <div>
+                        <strong>Paid but callback is slow?</strong>
+                        <span>
+                          Enter the M-Pesa receipt code from the customer's SMS to
+                          generate the receipt immediately.
+                        </span>
+                      </div>
+                      <label>
+                        M-Pesa receipt code
+                        <input
+                          value={mpesaReceiptCode}
+                          onChange={(event) => setMpesaReceiptCode(event.target.value)}
+                          placeholder="e.g. QG12ABCDEF"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        disabled={paymentBusy}
+                        onClick={() => void manuallyCompleteMpesaPayment()}
+                      >
+                        Confirm M-Pesa Payment
+                      </button>
+                    </section>
+                  )}
                 <table className="payment-table">
                   <tbody>
                     <tr>

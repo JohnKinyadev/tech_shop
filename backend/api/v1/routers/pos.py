@@ -9,6 +9,7 @@ from backend.schemas.approval_schemas import ApprovalDecision, ApprovalRequestRe
 from backend.schemas.base_schemas import Page
 from backend.schemas.customer_schemas import CustomerCreate, CustomerResponse
 from backend.schemas.payments_schemas import (
+    MpesaManualConfirmCreate,
     MpesaStkPushCreate,
     MpesaStkPushResponse,
     PaymentResponse,
@@ -255,6 +256,18 @@ def send_mpesa_stk_push(
     db: DatabaseSession,
 ) -> MpesaStkPushResponse:
     item = mpesa_service.initiate_sale_stk_push(db, principal, sale_id, payload)
+    db.commit()
+    return item
+
+
+@router.post("/sales/{sale_id}/mpesa/manual-confirm", response_model=PaymentResponse)
+def manually_confirm_mpesa_payment(
+    sale_id: UUID,
+    payload: MpesaManualConfirmCreate,
+    principal: SalesPrincipal,
+    db: DatabaseSession,
+) -> PaymentResponse:
+    item = mpesa_service.manually_confirm_sale_payment(db, principal, sale_id, payload)
     db.commit()
     return item
 
