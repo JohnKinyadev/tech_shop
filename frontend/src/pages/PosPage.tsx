@@ -4,11 +4,13 @@ import {
   ApiError,
   addSalePayment,
   closeTillSession,
+  createCustomer,
   createPosSale,
   currentTillSession,
   getPosSale,
   getSaleReceipt,
   listCatalogProducts,
+  listCustomers,
   listPosSales,
   listSerializedUnits,
   listTills,
@@ -17,6 +19,7 @@ import {
 } from "../api/client";
 import type {
   CatalogProduct,
+  Customer,
   PosProduct,
   PosSale,
   Receipt,
@@ -37,6 +40,7 @@ type CartItem = PosProduct & {
 };
 
 type PaymentMethod = "cash" | "mpesa" | "card" | "split";
+type SplitMethod = "cash" | "mpesa" | "card";
 
 function money(value: number) {
   return new Intl.NumberFormat("en-KE", {
@@ -105,11 +109,20 @@ export function PosPage() {
   const [products, setProducts] = useState<PosProduct[]>(mockProducts);
   const [catalogLive, setCatalogLive] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
+  const [customerName, setCustomerName] = useState("");
+  const [customerPhone, setCustomerPhone] = useState("");
   const [paymentMethod, setPaymentMethod] = useState<PaymentMethod>("cash");
   const [paymentReference, setPaymentReference] = useState("");
   const [mpesaPhone, setMpesaPhone] = useState("");
+  const [splitAmounts, setSplitAmounts] = useState<Record<SplitMethod, string>>({
+    cash: "",
+    mpesa: "",
+    card: "",
+  });
+  const [splitCardReference, setSplitCardReference] = useState("");
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
+  const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [receiptViewer, setReceiptViewer] = useState<Receipt | null>(null);
@@ -224,6 +237,11 @@ export function PosPage() {
   );
   const discount = 0;
   const total = Math.max(0, subtotal - discount);
+  const splitCashAmount = Number(splitAmounts.cash) || 0;
+  const splitMpesaAmount = Number(splitAmounts.mpesa) || 0;
+  const splitCardAmount = Number(splitAmounts.card) || 0;
+  const splitTotal = splitCashAmount + splitMpesaAmount + splitCardAmount;
+  const splitBalance = total - splitTotal;
 
   async function refreshRecentSales() {
     if (!token || isPreview || !user?.branch_id) return;
@@ -364,17 +382,41 @@ export function PosPage() {
 
   function openPaymentWithMethod(method: PaymentMethod) {
     setPaymentMethod(method);
+    setPaymentStatus(null);
     openPayment();
+  }
+
+  async function resolveCustomer(): Promise<Customer | null> {
+    if (!token || isPreview) return null;
+    const name = customerName.trim();
+    const phone = customerPhone.trim();
+
+    if (!name && !phone) return null;
+    if (!name || !phone) {
+      throw new Error("Enter both customer name and phone to print customer details on the receipt.");
+    }
+
+    const matches = await listCustomers(token, phone);
+    const existing = matches.find((customer) => customer.phone === phone);
+    if (existing) return existing;
+
+    return createCustomer(token, {
+      full_name: name,
+      phone,
+      home_branch_id: user?.branch_id ?? null,
+    });
   }
 
   async function ensurePendingSale() {
     if (!token || !user?.branch_id || !tillSession) {
       throw new Error("A branch and open till session are required before payment.");
     }
+    const customer = pendingSale ? null : await resolveCustomer();
     const sale =
       pendingSale ??
       (await createPosSale(token, {
         branch_id: user.branch_id,
+        customer_id: customer?.id ?? null,
         till_session_id: tillSession.id,
         channel: "pos",
         notes: "Created from POS terminal",
@@ -389,23 +431,31 @@ export function PosPage() {
     return sale;
   }
 
+  async function completeSaleReceipt(saleId: string, message: string) {
+    const officialReceipt = await getSaleReceipt(token!, saleId);
+    setReceipt(officialReceipt);
+    setReceiptViewer(officialReceipt);
+    setCart([]);
+    setPendingSale(null);
+    setPaymentReference("");
+    setMpesaPhone("");
+    setSplitAmounts({ cash: "", mpesa: "", card: "" });
+    setSplitCardReference("");
+    setPaymentStatus(null);
+    setPaymentOpen(false);
+    setNotice(message);
+    void refreshRecentSales();
+  }
+
   async function waitForMpesaCompletion(saleId: string) {
     if (!token) return false;
 
     for (let attempt = 0; attempt < 8; attempt += 1) {
+      setPaymentStatus(`M-Pesa prompt sent. Checking payment status ${attempt + 1}/8...`);
       await wait(4000);
       const latestSale = await getPosSale(token, saleId);
       if (latestSale.status === "completed") {
-        const officialReceipt = await getSaleReceipt(token, saleId);
-        setReceipt(officialReceipt);
-        setReceiptViewer(officialReceipt);
-        setCart([]);
-        setPendingSale(null);
-        setPaymentReference("");
-        setMpesaPhone("");
-        setPaymentOpen(false);
-        setNotice(`M-Pesa payment received. Sale ${officialReceipt.invoice_number} completed.`);
-        void refreshRecentSales();
+        await completeSaleReceipt(saleId, "M-Pesa payment received and receipt generated.");
         return true;
       }
       if (["cancelled", "voided", "refunded"].includes(latestSale.status)) {
@@ -414,6 +464,23 @@ export function PosPage() {
     }
 
     return false;
+  }
+
+  async function recordImmediatePayment(
+    saleId: string,
+    method: "cash" | "card",
+    amount: number,
+    providerReference?: string,
+  ) {
+    if (!token || amount <= 0) return;
+    setPaymentStatus(`Recording ${method === "cash" ? "cash" : "card"} payment...`);
+    await addSalePayment(token, saleId, {
+      method,
+      amount,
+      provider_reference: method === "cash" ? null : providerReference?.trim() || null,
+      idempotency_key: idempotencyKey(),
+      notes: `POS ${method} payment`,
+    });
   }
 
   async function completePayment() {
@@ -430,8 +497,24 @@ export function PosPage() {
     }
 
     if (paymentMethod === "split") {
-      setNotice("Split payment will come after single-method checkout is stable.");
-      return;
+      const splitCents = Math.round(splitTotal * 100);
+      const totalCents = Math.round(total * 100);
+      if (splitCents !== totalCents) {
+        setNotice(`Split payments must equal the sale total. Balance: ${money(splitBalance)}.`);
+        return;
+      }
+      if (splitTotal <= 0) {
+        setNotice("Enter at least one split payment amount.");
+        return;
+      }
+      if (splitMpesaAmount > 0 && !mpesaPhone.trim()) {
+        setNotice("Enter the customer's M-Pesa phone number for the split M-Pesa amount.");
+        return;
+      }
+      if (splitCardAmount > 0 && !splitCardReference.trim()) {
+        setNotice("Enter the card reference for the split card amount.");
+        return;
+      }
     }
 
     if (paymentMethod === "mpesa" && !mpesaPhone.trim()) {
@@ -445,19 +528,58 @@ export function PosPage() {
     }
 
     setPaymentBusy(true);
+    setPaymentStatus("Preparing payment...");
     try {
       const sale = await ensurePendingSale();
 
+      if (paymentMethod === "split") {
+        await recordImmediatePayment(sale.id, "cash", splitCashAmount);
+        await recordImmediatePayment(
+          sale.id,
+          "card",
+          splitCardAmount,
+          splitCardReference,
+        );
+
+        if (splitMpesaAmount > 0) {
+          setPaymentStatus("Sending M-Pesa prompt to customer...");
+          const prompt = await sendMpesaStkPush(token, sale.id, {
+            phone_number: mpesaPhone.trim(),
+            amount: splitMpesaAmount,
+            idempotency_key: idempotencyKey(),
+            notes: `Split M-Pesa payment for ${sale.invoice_number}`,
+          });
+          setPaymentStatus(prompt.customer_message);
+          setNotice(prompt.customer_message);
+          const completed = await waitForMpesaCompletion(sale.id);
+          if (!completed) {
+            setPaymentStatus(
+              "M-Pesa prompt sent. Waiting for callback before receipt is generated.",
+            );
+            setNotice(
+              "Split payment partially recorded. Waiting for M-Pesa callback before receipt is generated.",
+            );
+          }
+          return;
+        }
+
+        await completeSaleReceipt(sale.id, "Split payment completed successfully.");
+        return;
+      }
+
       if (paymentMethod === "mpesa") {
+        setPaymentStatus("Sending M-Pesa prompt to customer...");
         const prompt = await sendMpesaStkPush(token, sale.id, {
           phone_number: mpesaPhone.trim(),
           amount: sale.total_amount,
           idempotency_key: idempotencyKey(),
           notes: `POS M-Pesa payment for ${sale.invoice_number}`,
         });
+        setPaymentStatus(prompt.customer_message);
         setNotice(prompt.customer_message);
         const completed = await waitForMpesaCompletion(sale.id);
         if (!completed) {
+          setPaymentStatus("M-Pesa prompt sent. Waiting for Safaricom callback.");
           setNotice(
             "M-Pesa prompt sent. Waiting for Safaricom callback; refresh recent sales once the customer completes payment.",
           );
@@ -473,18 +595,10 @@ export function PosPage() {
         notes: `POS ${paymentMethod} payment`,
       });
 
-      const officialReceipt = await getSaleReceipt(token, sale.id);
-      setReceipt(officialReceipt);
-      setReceiptViewer(officialReceipt);
-      setCart([]);
-      setPendingSale(null);
-      setPaymentReference("");
-      setMpesaPhone("");
-      setPaymentOpen(false);
-      setNotice(`Sale ${officialReceipt.invoice_number} completed successfully.`);
-      void refreshRecentSales();
+      await completeSaleReceipt(sale.id, "Sale completed successfully.");
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not complete sale.");
+      setPaymentStatus(error instanceof Error ? error.message : "Could not complete sale.");
     } finally {
       setPaymentBusy(false);
     }
@@ -570,12 +684,29 @@ export function PosPage() {
           <button className="orders-tab orders-tab--add">+</button>
         </header>
 
-        <div className="customer-strip">
-          <div>
-            <span>Client</span>
-            <strong>Walk-in customer</strong>
-          </div>
-          <button>Search Clients</button>
+        <div className="customer-strip customer-strip--editable">
+          <label>
+            <span>Customer name</span>
+            <input
+              value={customerName}
+              onChange={(event) => {
+                setCustomerName(event.target.value);
+                setPendingSale(null);
+              }}
+              placeholder="Walk-in customer"
+            />
+          </label>
+          <label>
+            <span>Phone for receipt</span>
+            <input
+              value={customerPhone}
+              onChange={(event) => {
+                setCustomerPhone(event.target.value);
+                setPendingSale(null);
+              }}
+              placeholder="0712 345 678"
+            />
+          </label>
         </div>
 
         <div className="order-list">
@@ -809,69 +940,72 @@ export function PosPage() {
           </section>
         )}
 
-        {notice && (
-          <div className="notice">
-            <span>{notice}</span>
-            <button onClick={() => setNotice(null)}>Dismiss</button>
-          </div>
-        )}
-
-        {receipt && (
-          <section className="receipt-strip">
-            <div>
-              <p className="eyebrow">Last receipt</p>
-              <strong>{receipt.invoice_number}</strong>
-              <span>
-                {receipt.branch_name} / {receipt.cashier_name ?? user?.full_name} /{" "}
-                {receipt.items.length} item(s)
-              </span>
-              <span>{dateLabel(receipt.completed_at)}</span>
+        <div className="pos-activity-dock">
+          {notice && (
+            <div className="notice">
+              <span>{notice}</span>
+              <button onClick={() => setNotice(null)}>Dismiss</button>
             </div>
-            <strong>{money(Number(receipt.total_amount))}</strong>
-          </section>
-        )}
+          )}
 
-        <section className="sales-history-panel">
-          <header>
-            <div>
-              <p className="eyebrow">Recent sales</p>
-              <strong>Receipts / invoices</strong>
-            </div>
-            <button onClick={() => void refreshRecentSales()} disabled={historyBusy}>
-              {historyBusy ? "Loading..." : "Refresh"}
-            </button>
-          </header>
-
-          <div className="sales-history-list">
-            {recentSales.length === 0 && (
-              <div className="sales-history-empty">
-                No sales found yet. Completed sales will appear here.
+          {receipt && (
+            <section className="receipt-strip">
+              <div>
+                <p className="eyebrow">Last receipt</p>
+                <strong>{receipt.invoice_number}</strong>
+                <span>
+                  {receipt.branch_name} / {receipt.cashier_name ?? user?.full_name} /{" "}
+                  {receipt.items.length} item(s)
+                </span>
+                <span>{dateLabel(receipt.completed_at)}</span>
               </div>
-            )}
+              <strong>{money(Number(receipt.total_amount))}</strong>
+            </section>
+          )}
 
-            {recentSales.map((sale) => (
-              <article className="sales-history-row" key={sale.id}>
-                <div>
-                  <strong>{sale.invoice_number}</strong>
-                  <span>
-                    {sale.items.length} item(s) / Paid {money(Number(sale.paid_amount))}
-                  </span>
-                  <span>{dateLabel(sale.completed_at ?? sale.created_at)}</span>
+          <section className="sales-history-panel">
+            <header>
+              <div>
+                <p className="eyebrow">Recent sales</p>
+                <strong>Receipts / invoices</strong>
+              </div>
+              <button onClick={() => void refreshRecentSales()} disabled={historyBusy}>
+                {historyBusy ? "Loading..." : "Refresh"}
+              </button>
+            </header>
+
+            <div className="sales-history-list">
+              {recentSales.length === 0 && (
+                <div className="sales-history-empty">
+                  No sales found yet. Completed sales will appear here.
                 </div>
-                <StatusPill tone={saleStatusTone(sale.status)}>
-                  {sale.status.replace(/_/g, " ")}
-                </StatusPill>
-                <strong>{money(Number(sale.total_amount))}</strong>
-                <button
-                  disabled={sale.status !== "completed" || historyBusy}
-                  onClick={() => void openReceiptViewer(sale.id)}
-                >
-                  Receipt
-                </button>
-              </article>
-            ))}
-          </div>
-        </section>
+              )}
+
+              {recentSales.map((sale) => (
+                <article className="sales-history-row" key={sale.id}>
+                  <div>
+                    <strong>{sale.invoice_number}</strong>
+                    <span>
+                      {sale.items.length} item(s) / Paid{" "}
+                      {money(Number(sale.paid_amount))}
+                    </span>
+                    <span>{dateLabel(sale.completed_at ?? sale.created_at)}</span>
+                  </div>
+                  <StatusPill tone={saleStatusTone(sale.status)}>
+                    {sale.status.replace(/_/g, " ")}
+                  </StatusPill>
+                  <strong>{money(Number(sale.total_amount))}</strong>
+                  <button
+                    disabled={sale.status !== "completed" || historyBusy}
+                    onClick={() => void openReceiptViewer(sale.id)}
+                  >
+                    Receipt
+                  </button>
+                </article>
+              ))}
+            </div>
+          </section>
+        </div>
 
         <div className="product-list-scroller">
           <div className="terminal-product-grid">
@@ -1053,6 +1187,88 @@ export function PosPage() {
                     </button>
                   ))}
                 </div>
+                {paymentStatus && (
+                  <div className="payment-status-banner">
+                    <strong>Payment status</strong>
+                    <span>{paymentStatus}</span>
+                  </div>
+                )}
+                {paymentMethod === "split" && (
+                  <section className="split-payment-panel">
+                    <div>
+                      <strong>Split this payment</strong>
+                      <span>
+                        Balance: {money(splitBalance)} / Total selected:{" "}
+                        {money(splitTotal)}
+                      </span>
+                    </div>
+                    <label>
+                      Cash amount
+                      <input
+                        type="number"
+                        min="0"
+                        value={splitAmounts.cash}
+                        onChange={(event) =>
+                          setSplitAmounts((current) => ({
+                            ...current,
+                            cash: event.target.value,
+                          }))
+                        }
+                        placeholder="0"
+                      />
+                    </label>
+                    <label>
+                      M-Pesa amount
+                      <input
+                        type="number"
+                        min="0"
+                        value={splitAmounts.mpesa}
+                        onChange={(event) =>
+                          setSplitAmounts((current) => ({
+                            ...current,
+                            mpesa: event.target.value,
+                          }))
+                        }
+                        placeholder="0"
+                      />
+                    </label>
+                    {splitMpesaAmount > 0 && (
+                      <label>
+                        M-Pesa phone
+                        <input
+                          value={mpesaPhone}
+                          onChange={(event) => setMpesaPhone(event.target.value)}
+                          placeholder="0712 345 678"
+                        />
+                      </label>
+                    )}
+                    <label>
+                      Card amount
+                      <input
+                        type="number"
+                        min="0"
+                        value={splitAmounts.card}
+                        onChange={(event) =>
+                          setSplitAmounts((current) => ({
+                            ...current,
+                            card: event.target.value,
+                          }))
+                        }
+                        placeholder="0"
+                      />
+                    </label>
+                    {splitCardAmount > 0 && (
+                      <label>
+                        Card reference
+                        <input
+                          value={splitCardReference}
+                          onChange={(event) => setSplitCardReference(event.target.value)}
+                          placeholder="Card approval/reference number"
+                        />
+                      </label>
+                    )}
+                  </section>
+                )}
                 {paymentMethod === "mpesa" && (
                   <label className="payment-reference">
                     Customer M-Pesa phone
@@ -1108,9 +1324,13 @@ export function PosPage() {
                   {paymentBusy
                     ? paymentMethod === "mpesa"
                       ? "Waiting for M-Pesa..."
+                      : paymentMethod === "split"
+                        ? "Processing Split..."
                       : "Completing..."
                     : paymentMethod === "mpesa"
                       ? "Send M-Pesa Prompt"
+                      : paymentMethod === "split"
+                        ? "Complete Split Payment"
                       : "Confirm Payment"}
                 </button>
               </section>

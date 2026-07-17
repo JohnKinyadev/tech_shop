@@ -1876,19 +1876,20 @@ button:disabled {
 }
 
 .customer-strip {
-  display: flex;
-  align-items: center;
-  justify-content: space-between;
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) minmax(140px, 180px);
   gap: 12px;
-  padding: 12px 14px;
+  align-items: end;
+  padding: 9px 12px;
   border-top: 1px solid #fff;
   border-bottom: 1px solid var(--line);
   background: #fff;
 }
 
+.customer-strip label,
 .customer-strip div {
   display: grid;
-  gap: 2px;
+  gap: 4px;
 }
 
 .customer-strip span {
@@ -1896,6 +1897,16 @@ button:disabled {
   font-size: 11px;
   font-weight: 700;
   text-transform: uppercase;
+}
+
+.customer-strip input {
+  width: 100%;
+  height: 34px;
+  padding: 6px 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  outline: none;
 }
 
 .order-list {
@@ -2078,8 +2089,8 @@ button:disabled {
 }
 
 .pos-products-panel {
-  display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr);
+  display: flex;
+  flex-direction: column;
   min-height: 0;
   min-width: 0;
   background: var(--app-bg);
@@ -2249,7 +2260,17 @@ button:disabled {
   font-weight: 700;
 }
 
+.pos-activity-dock {
+  flex: 0 0 auto;
+  max-height: 245px;
+  overflow: auto;
+  border-bottom: 1px solid var(--line);
+  background: rgba(228, 235, 242, 0.86);
+}
+
 .product-list-scroller {
+  flex: 1 1 280px;
+  min-height: 280px;
   overflow: auto;
   background: var(--app-bg);
 }
@@ -2458,7 +2479,7 @@ button:disabled {
   inset: 24px;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
-  max-width: 920px;
+  max-width: 620px;
   margin: 0 auto;
   overflow: hidden;
   border-radius: var(--radius);
@@ -2499,19 +2520,19 @@ button:disabled {
   display: grid;
   gap: 12px;
   overflow: auto;
-  margin: 14px;
+  width: min(100% - 28px, 460px);
+  margin: 14px auto;
   padding: 16px;
   border: 1px solid var(--line);
   background: #fff;
 }
 
 .receipt-brand {
-  display: flex;
-  align-items: flex-start;
-  justify-content: space-between;
-  gap: 16px;
+  display: grid;
+  gap: 10px;
   padding-bottom: 12px;
   border-bottom: 1px solid var(--line);
+  text-align: center;
 }
 
 .receipt-brand div {
@@ -2520,7 +2541,7 @@ button:disabled {
 }
 
 .receipt-brand div:last-child {
-  text-align: right;
+  text-align: center;
 }
 
 .receipt-brand p,
@@ -2538,8 +2559,8 @@ button:disabled {
 
 .receipt-paper__meta {
   display: grid;
-  grid-template-columns: repeat(auto-fit, minmax(160px, 1fr));
-  gap: 8px;
+  grid-template-columns: 1fr;
+  gap: 6px;
 }
 
 .receipt-paper__meta div,
@@ -2547,6 +2568,12 @@ button:disabled {
 .receipt-payments {
   display: grid;
   gap: 4px;
+}
+
+.receipt-paper__meta div {
+  grid-template-columns: 92px minmax(0, 1fr);
+  padding: 6px 0;
+  border-bottom: 1px dashed var(--line);
 }
 
 .receipt-paper__meta span,
@@ -2557,9 +2584,9 @@ button:disabled {
 
 .receipt-totals {
   display: grid;
-  max-width: 360px;
+  max-width: none;
   gap: 7px;
-  justify-self: end;
+  justify-self: stretch;
   width: 100%;
 }
 
@@ -2633,6 +2660,58 @@ button:disabled {
   color: #fff;
   border-color: var(--nav);
   background: var(--nav);
+}
+
+.payment-status-banner {
+  display: grid;
+  gap: 4px;
+  margin-bottom: 14px;
+  padding: 10px 12px;
+  color: #155da5;
+  border: 1px solid #b6d7f5;
+  border-radius: var(--radius);
+  background: #eef7ff;
+}
+
+.payment-status-banner span {
+  line-height: 1.45;
+}
+
+.split-payment-panel {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 10px;
+  margin-bottom: 18px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.split-payment-panel > div {
+  display: grid;
+  grid-column: 1 / -1;
+  gap: 3px;
+}
+
+.split-payment-panel > div span {
+  color: var(--muted);
+}
+
+.split-payment-panel label {
+  display: grid;
+  gap: 5px;
+  color: var(--text);
+  font-weight: 700;
+}
+
+.split-payment-panel input {
+  height: 38px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  outline: none;
 }
 
 .payment-reference {
@@ -2729,6 +2808,14 @@ button:disabled {
 
   .customer-strip {
     padding: 8px 12px;
+  }
+
+  .customer-strip input {
+    height: 30px;
+  }
+
+  .pos-activity-dock {
+    max-height: 170px;
   }
 
   .order-summary {
