@@ -2096,14 +2096,72 @@ button:disabled {
   background: var(--app-bg);
 }
 
+.pos-workspace-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 12px;
+  padding: 10px 12px 0;
+  background: #fff;
+  border-bottom: 1px solid var(--line);
+}
+
+.pos-workspace-tabs {
+  display: flex;
+  gap: 4px;
+  align-items: end;
+}
+
+.pos-workspace-tabs button {
+  display: inline-flex;
+  min-height: 42px;
+  align-items: center;
+  gap: 7px;
+  padding: 0 16px;
+  border: 1px solid var(--line);
+  border-bottom: 0;
+  border-radius: var(--radius) var(--radius) 0 0;
+  background: var(--panel-soft);
+  color: var(--text);
+  font-weight: 800;
+}
+
+.pos-workspace-tabs button.is-active {
+  color: #fff;
+  border-color: var(--nav);
+  background: var(--nav);
+}
+
+.pos-workspace-tabs button span {
+  min-width: 21px;
+  padding: 2px 6px;
+  border-radius: 999px;
+  background: rgba(255, 255, 255, 0.22);
+  font-size: 11px;
+  text-align: center;
+}
+
+.pos-products-view,
+.pos-receipts-workspace,
+.pos-held-workspace {
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+}
+
 .pos-products-header {
+  position: sticky;
+  top: 0;
+  z-index: 2;
+  flex: 0 0 auto;
   background: #fff;
   border-bottom: 1px solid var(--line);
 }
 
 .pos-search-row {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto auto;
+  grid-template-columns: minmax(0, 1fr) auto;
   gap: 10px;
   align-items: center;
   padding: 10px;
@@ -2260,17 +2318,14 @@ button:disabled {
   font-weight: 700;
 }
 
-.pos-activity-dock {
+.notice--pos {
   flex: 0 0 auto;
-  max-height: 245px;
-  overflow: auto;
-  border-bottom: 1px solid var(--line);
-  background: rgba(228, 235, 242, 0.86);
+  margin: 8px 12px 0;
 }
 
 .product-list-scroller {
-  flex: 1 1 280px;
-  min-height: 280px;
+  flex: 1 1 auto;
+  min-height: 0;
   overflow: auto;
   background: var(--app-bg);
 }
@@ -2343,7 +2398,7 @@ button:disabled {
   align-items: center;
   justify-content: space-between;
   gap: 12px;
-  margin: 0 12px 12px;
+  margin: 12px 12px 0;
   padding: 11px 12px;
   border: 1px solid #b9d8f0;
   border-radius: var(--radius);
@@ -2363,10 +2418,29 @@ button:disabled {
   color: var(--muted);
 }
 
+.receipt-strip__actions {
+  display: grid;
+  gap: 6px;
+  justify-items: end;
+}
+
+.receipt-strip__actions button {
+  min-height: 30px;
+  padding: 4px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  font-weight: 700;
+}
+
+.pos-receipts-workspace {
+  overflow: auto;
+}
+
 .sales-history-panel {
   display: grid;
   gap: 8px;
-  margin: 0 12px 12px;
+  margin: 12px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2395,7 +2469,6 @@ button:disabled {
 .sales-history-list {
   display: grid;
   gap: 6px;
-  max-height: 190px;
   overflow: auto;
 }
 
@@ -2429,6 +2502,27 @@ button:disabled {
   padding: 10px;
   border: 1px dashed var(--line);
   border-radius: var(--radius);
+}
+
+.pos-empty-state {
+  display: grid;
+  gap: 6px;
+  min-height: 150px;
+  place-content: center;
+  padding: 20px;
+  color: var(--muted);
+  border: 1px dashed var(--line-strong);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.72);
+  text-align: center;
+}
+
+.pos-empty-state strong {
+  color: var(--text);
+}
+
+.pos-held-workspace {
+  padding: 12px;
 }
 
 .modal-backdrop {
@@ -2814,8 +2908,17 @@ button:disabled {
     height: 30px;
   }
 
-  .pos-activity-dock {
-    max-height: 170px;
+  .pos-workspace-header {
+    padding: 7px 9px 0;
+  }
+
+  .pos-workspace-tabs button {
+    min-height: 36px;
+    padding: 0 11px;
+  }
+
+  .notice--pos {
+    margin-top: 6px;
   }
 
   .order-summary {

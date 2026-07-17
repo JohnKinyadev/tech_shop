@@ -41,6 +41,7 @@ type CartItem = PosProduct & {
 
 type PaymentMethod = "cash" | "mpesa" | "card" | "split";
 type SplitMethod = "cash" | "mpesa" | "card";
+type PosWorkspaceTab = "products" | "receipts" | "held";
 
 function money(value: number) {
   return new Intl.NumberFormat("en-KE", {
@@ -106,6 +107,8 @@ export function PosPage() {
   const { token, isPreview, user } = useAuth();
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
+  const [activeWorkspaceTab, setActiveWorkspaceTab] =
+    useState<PosWorkspaceTab>("products");
   const [products, setProducts] = useState<PosProduct[]>(mockProducts);
   const [catalogLive, setCatalogLive] = useState(false);
   const [cart, setCart] = useState<CartItem[]>([]);
@@ -443,6 +446,7 @@ export function PosPage() {
     setSplitCardReference("");
     setPaymentStatus(null);
     setPaymentOpen(false);
+    setActiveWorkspaceTab("receipts");
     setNotice(message);
     void refreshRecentSales();
   }
@@ -809,230 +813,282 @@ export function PosPage() {
       </aside>
 
       <section className="pos-products-panel">
-        <header className="pos-products-header">
-          <div className="pos-search-row">
-            <label className="pos-search">
-              <span>Search</span>
-              <input
-                value={query}
-                onChange={(event) => setQuery(event.target.value)}
-                placeholder="Search products, SKU, barcode"
-                autoFocus
-              />
-            </label>
-            <button className="info-button">Product Information</button>
-            <StatusPill tone={tillSession ? "success" : "warning"}>
-              {tillSession ? "Till open" : "Open till required"}
-            </StatusPill>
-          </div>
-
-          <div className="category-list">
-            {categories.map((category) => (
+        <header className="pos-workspace-header">
+          <nav className="pos-workspace-tabs" aria-label="POS workspace">
+            {[
+              ["products", "Products"],
+              ["receipts", "Receipts"],
+              ["held", "Held Orders"],
+            ].map(([tab, label]) => (
               <button
-                key={category}
-                className={activeCategory === category ? "is-active" : ""}
-                onClick={() => setActiveCategory(category)}
+                key={tab}
+                className={activeWorkspaceTab === tab ? "is-active" : ""}
+                onClick={() => setActiveWorkspaceTab(tab as PosWorkspaceTab)}
               >
-                {category}
+                {label}
+                {tab === "receipts" && recentSales.length > 0 && (
+                  <span>{recentSales.length}</span>
+                )}
               </button>
             ))}
-          </div>
+          </nav>
+
+          <StatusPill tone={tillSession ? "success" : "warning"}>
+            {tillSession ? "Till open" : "Open till required"}
+          </StatusPill>
         </header>
 
-        {!tillSession && token && !isPreview && (
-          <form className="till-open-panel" onSubmit={handleOpenTill}>
-            <div>
-              <p className="eyebrow">Open till</p>
-              <strong>Start cashier session</strong>
-              <span>Select a physical till and confirm the opening cash float.</span>
-            </div>
-            <label>
-              Till
-              <select
-                value={selectedTillId}
-                onChange={(event) => setSelectedTillId(event.target.value)}
-              >
-                <option value="">Select till</option>
-                {tills.map((till) => (
-                  <option key={till.id} value={till.id}>
-                    {till.name} / {till.code}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <label>
-              Opening float
-              <input
-                type="number"
-                min="0"
-                value={openingFloat}
-                onChange={(event) => setOpeningFloat(event.target.value)}
-              />
-            </label>
-            <button className="primary-button" disabled={tillBusy || !tills.length}>
-              {tillBusy ? "Opening..." : "Open Till"}
-            </button>
-          </form>
+        {notice && (
+          <div className="notice notice--pos">
+            <span>{notice}</span>
+            <button onClick={() => setNotice(null)}>Dismiss</button>
+          </div>
         )}
 
-        {tillSession && token && !isPreview && (
-          <section className="till-close-panel">
-            <div>
-              <p className="eyebrow">Till session</p>
-              <strong>Cashier till is open</strong>
-              <span>
-                Opened {dateLabel(tillSession.opened_at)} / Float{" "}
-                {money(Number(tillSession.opening_float))}
-              </span>
-            </div>
-            {!closeTillOpen ? (
-              <button
-                className="secondary-button"
-                onClick={() => {
-                  setCloseTillOpen(true);
-                  setClosingCash(tillSession.expected_cash ?? "");
-                }}
-              >
-                Close Till
-              </button>
-            ) : (
-              <form onSubmit={handleCloseTill}>
+        {activeWorkspaceTab === "products" && (
+          <section className="pos-products-view">
+            <header className="pos-products-header">
+              <div className="pos-search-row">
+                <label className="pos-search">
+                  <span>Search</span>
+                  <input
+                    value={query}
+                    onChange={(event) => setQuery(event.target.value)}
+                    placeholder="Search products, SKU, barcode"
+                    autoFocus
+                  />
+                </label>
+                <button className="info-button">Product Information</button>
+              </div>
+
+              <div className="category-list">
+                {categories.map((category) => (
+                  <button
+                    key={category}
+                    className={activeCategory === category ? "is-active" : ""}
+                    onClick={() => setActiveCategory(category)}
+                  >
+                    {category}
+                  </button>
+                ))}
+              </div>
+            </header>
+
+            {!tillSession && token && !isPreview && (
+              <form className="till-open-panel" onSubmit={handleOpenTill}>
+                <div>
+                  <p className="eyebrow">Open till</p>
+                  <strong>Start cashier session</strong>
+                  <span>Select a physical till and confirm the opening cash float.</span>
+                </div>
                 <label>
-                  Counted closing cash
+                  Till
+                  <select
+                    value={selectedTillId}
+                    onChange={(event) => setSelectedTillId(event.target.value)}
+                  >
+                    <option value="">Select till</option>
+                    {tills.map((till) => (
+                      <option key={till.id} value={till.id}>
+                        {till.name} / {till.code}
+                      </option>
+                    ))}
+                  </select>
+                </label>
+                <label>
+                  Opening float
                   <input
                     type="number"
                     min="0"
-                    value={closingCash}
-                    onChange={(event) => setClosingCash(event.target.value)}
-                    placeholder="Enter counted cash"
+                    value={openingFloat}
+                    onChange={(event) => setOpeningFloat(event.target.value)}
                   />
                 </label>
-                <div className="table-actions">
-                  <button className="danger-button" disabled={tillBusy}>
-                    {tillBusy ? "Closing..." : "Confirm Close"}
-                  </button>
-                  <button
-                    type="button"
-                    onClick={() => setCloseTillOpen(false)}
-                    disabled={tillBusy}
-                  >
-                    Cancel
-                  </button>
-                </div>
+                <button className="primary-button" disabled={tillBusy || !tills.length}>
+                  {tillBusy ? "Opening..." : "Open Till"}
+                </button>
               </form>
             )}
+
+            {tillSession && token && !isPreview && (
+              <section className="till-close-panel">
+                <div>
+                  <p className="eyebrow">Till session</p>
+                  <strong>Cashier till is open</strong>
+                  <span>
+                    Opened {dateLabel(tillSession.opened_at)} / Float{" "}
+                    {money(Number(tillSession.opening_float))}
+                  </span>
+                </div>
+                {!closeTillOpen ? (
+                  <button
+                    className="secondary-button"
+                    onClick={() => {
+                      setCloseTillOpen(true);
+                      setClosingCash(tillSession.expected_cash ?? "");
+                    }}
+                  >
+                    Close Till
+                  </button>
+                ) : (
+                  <form onSubmit={handleCloseTill}>
+                    <label>
+                      Counted closing cash
+                      <input
+                        type="number"
+                        min="0"
+                        value={closingCash}
+                        onChange={(event) => setClosingCash(event.target.value)}
+                        placeholder="Enter counted cash"
+                      />
+                    </label>
+                    <div className="table-actions">
+                      <button className="danger-button" disabled={tillBusy}>
+                        {tillBusy ? "Closing..." : "Confirm Close"}
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => setCloseTillOpen(false)}
+                        disabled={tillBusy}
+                      >
+                        Cancel
+                      </button>
+                    </div>
+                  </form>
+                )}
+              </section>
+            )}
+
+            {!tillSession && lastClosedTill && (
+              <section className="till-close-summary">
+                <div>
+                  <p className="eyebrow">Last till close</p>
+                  <strong>{dateLabel(lastClosedTill.closed_at)}</strong>
+                  <span>
+                    Expected {money(Number(lastClosedTill.expected_cash ?? 0))} / Counted{" "}
+                    {money(Number(lastClosedTill.closing_cash ?? 0))}
+                  </span>
+                </div>
+                <StatusPill
+                  tone={(tillVariance(lastClosedTill) ?? 0) === 0 ? "success" : "warning"}
+                >
+                  Variance {money(tillVariance(lastClosedTill) ?? 0)}
+                </StatusPill>
+              </section>
+            )}
+
+            <div className="product-list-scroller">
+              <div className="terminal-product-grid">
+                {filtered.map((product) => (
+                  <button
+                    className="product-tile"
+                    key={product.id}
+                    onClick={() => addToCart(product)}
+                  >
+                    <span
+                      className="product-tile__media"
+                      style={{ background: product.accent }}
+                    >
+                      {product.name.slice(0, 2).toUpperCase()}
+                    </span>
+                    <span className="product-tile__body">
+                      <strong>{product.name}</strong>
+                      <small>{product.variantName}</small>
+                      <span className="product-tile__meta">
+                        <b>{money(product.price)}</b>
+                        <em>{product.stockHint}</em>
+                      </span>
+                    </span>
+                  </button>
+                ))}
+
+                {filtered.length === 0 && (
+                  <div className="pos-empty-state">
+                    <strong>No matching products</strong>
+                    <span>Try another search term or category.</span>
+                  </div>
+                )}
+              </div>
+            </div>
           </section>
         )}
 
-        {!tillSession && lastClosedTill && (
-          <section className="till-close-summary">
-            <div>
-              <p className="eyebrow">Last till close</p>
-              <strong>{dateLabel(lastClosedTill.closed_at)}</strong>
+        {activeWorkspaceTab === "receipts" && (
+          <section className="pos-receipts-workspace">
+            {receipt && (
+              <section className="receipt-strip">
+                <div>
+                  <p className="eyebrow">Last receipt</p>
+                  <strong>{receipt.invoice_number}</strong>
+                  <span>
+                    {receipt.branch_name} / {receipt.cashier_name ?? user?.full_name} /{" "}
+                    {receipt.items.length} item(s)
+                  </span>
+                  <span>{dateLabel(receipt.completed_at)}</span>
+                </div>
+                <div className="receipt-strip__actions">
+                  <strong>{money(Number(receipt.total_amount))}</strong>
+                  <button onClick={() => setReceiptViewer(receipt)}>Open</button>
+                </div>
+              </section>
+            )}
+
+            <section className="sales-history-panel">
+              <header>
+                <div>
+                  <p className="eyebrow">Recent sales</p>
+                  <strong>Receipts / invoices</strong>
+                </div>
+                <button onClick={() => void refreshRecentSales()} disabled={historyBusy}>
+                  {historyBusy ? "Loading..." : "Refresh"}
+                </button>
+              </header>
+
+              <div className="sales-history-list">
+                {recentSales.length === 0 && (
+                  <div className="sales-history-empty">
+                    No sales found yet. Completed sales will appear here.
+                  </div>
+                )}
+
+                {recentSales.map((sale) => (
+                  <article className="sales-history-row" key={sale.id}>
+                    <div>
+                      <strong>{sale.invoice_number}</strong>
+                      <span>
+                        {sale.items.length} item(s) / Paid{" "}
+                        {money(Number(sale.paid_amount))}
+                      </span>
+                      <span>{dateLabel(sale.completed_at ?? sale.created_at)}</span>
+                    </div>
+                    <StatusPill tone={saleStatusTone(sale.status)}>
+                      {sale.status.replace(/_/g, " ")}
+                    </StatusPill>
+                    <strong>{money(Number(sale.total_amount))}</strong>
+                    <button
+                      disabled={sale.status !== "completed" || historyBusy}
+                      onClick={() => void openReceiptViewer(sale.id)}
+                    >
+                      Receipt
+                    </button>
+                  </article>
+                ))}
+              </div>
+            </section>
+          </section>
+        )}
+
+        {activeWorkspaceTab === "held" && (
+          <section className="pos-held-workspace">
+            <div className="pos-empty-state">
+              <strong>Held orders will live here</strong>
               <span>
-                Expected {money(Number(lastClosedTill.expected_cash ?? 0))} / Counted{" "}
-                {money(Number(lastClosedTill.closing_cash ?? 0))}
+                The visual space is ready. Next we can wire Hold/Resume once the
+                sale-hold workflow is added.
               </span>
             </div>
-            <StatusPill tone={(tillVariance(lastClosedTill) ?? 0) === 0 ? "success" : "warning"}>
-              Variance {money(tillVariance(lastClosedTill) ?? 0)}
-            </StatusPill>
           </section>
         )}
-
-        <div className="pos-activity-dock">
-          {notice && (
-            <div className="notice">
-              <span>{notice}</span>
-              <button onClick={() => setNotice(null)}>Dismiss</button>
-            </div>
-          )}
-
-          {receipt && (
-            <section className="receipt-strip">
-              <div>
-                <p className="eyebrow">Last receipt</p>
-                <strong>{receipt.invoice_number}</strong>
-                <span>
-                  {receipt.branch_name} / {receipt.cashier_name ?? user?.full_name} /{" "}
-                  {receipt.items.length} item(s)
-                </span>
-                <span>{dateLabel(receipt.completed_at)}</span>
-              </div>
-              <strong>{money(Number(receipt.total_amount))}</strong>
-            </section>
-          )}
-
-          <section className="sales-history-panel">
-            <header>
-              <div>
-                <p className="eyebrow">Recent sales</p>
-                <strong>Receipts / invoices</strong>
-              </div>
-              <button onClick={() => void refreshRecentSales()} disabled={historyBusy}>
-                {historyBusy ? "Loading..." : "Refresh"}
-              </button>
-            </header>
-
-            <div className="sales-history-list">
-              {recentSales.length === 0 && (
-                <div className="sales-history-empty">
-                  No sales found yet. Completed sales will appear here.
-                </div>
-              )}
-
-              {recentSales.map((sale) => (
-                <article className="sales-history-row" key={sale.id}>
-                  <div>
-                    <strong>{sale.invoice_number}</strong>
-                    <span>
-                      {sale.items.length} item(s) / Paid{" "}
-                      {money(Number(sale.paid_amount))}
-                    </span>
-                    <span>{dateLabel(sale.completed_at ?? sale.created_at)}</span>
-                  </div>
-                  <StatusPill tone={saleStatusTone(sale.status)}>
-                    {sale.status.replace(/_/g, " ")}
-                  </StatusPill>
-                  <strong>{money(Number(sale.total_amount))}</strong>
-                  <button
-                    disabled={sale.status !== "completed" || historyBusy}
-                    onClick={() => void openReceiptViewer(sale.id)}
-                  >
-                    Receipt
-                  </button>
-                </article>
-              ))}
-            </div>
-          </section>
-        </div>
-
-        <div className="product-list-scroller">
-          <div className="terminal-product-grid">
-            {filtered.map((product) => (
-              <button
-                className="product-tile"
-                key={product.id}
-                onClick={() => addToCart(product)}
-              >
-                <span
-                  className="product-tile__media"
-                  style={{ background: product.accent }}
-                >
-                  {product.name.slice(0, 2).toUpperCase()}
-                </span>
-                <span className="product-tile__body">
-                  <strong>{product.name}</strong>
-                  <small>{product.variantName}</small>
-                  <span className="product-tile__meta">
-                    <b>{money(product.price)}</b>
-                    <em>{product.stockHint}</em>
-                  </span>
-                </span>
-              </button>
-            ))}
-          </div>
-        </div>
       </section>
 
       {receiptViewer && (
