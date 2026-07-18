@@ -11,16 +11,21 @@ import {
   getSaleReceipt,
   listCatalogProducts,
   listCustomers,
+  listSalePayments,
   listPosSales,
   listSerializedUnits,
   listTills,
   manuallyConfirmMpesaPayment,
+  markPaymentAttemptOutcome,
   openTillSession,
+  queryMpesaPaymentStatus,
+  recordFailedPaymentAttempt,
   sendMpesaStkPush,
 } from "../api/client";
 import type {
   CatalogProduct,
   Customer,
+  Payment,
   PosProduct,
   PosSale,
   Receipt,
@@ -81,6 +86,14 @@ function saleStatusTone(status: string): StatusTone {
   return "neutral";
 }
 
+function paymentStatusTone(status: string): StatusTone {
+  if (status === "completed") return "success";
+  if (status === "pending") return "warning";
+  if (status === "failed" || status === "cancelled") return "danger";
+  if (status === "refunded") return "neutral";
+  return "neutral";
+}
+
 function tillVariance(session: TillSession | null) {
   if (!session?.expected_cash || !session.closing_cash) return null;
   return Number(session.closing_cash) - Number(session.expected_cash);
@@ -132,6 +145,8 @@ export function PosPage() {
   const [paymentOpen, setPaymentOpen] = useState(false);
   const [paymentBusy, setPaymentBusy] = useState(false);
   const [paymentStatus, setPaymentStatus] = useState<string | null>(null);
+  const [paymentAttempts, setPaymentAttempts] = useState<Payment[]>([]);
+  const [attemptsBusy, setAttemptsBusy] = useState(false);
   const [notice, setNotice] = useState<string | null>(null);
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [receiptViewer, setReceiptViewer] = useState<Receipt | null>(null);
@@ -249,12 +264,21 @@ export function PosPage() {
   const paymentSubtotal = pendingSale ? Number(pendingSale.subtotal) : subtotal;
   const paymentDiscount = pendingSale ? Number(pendingSale.discount_amount) : discount;
   const paymentTotal = pendingSale ? Number(pendingSale.total_amount) : total;
+  const paymentOutstanding = pendingSale
+    ? Math.max(0, Number(pendingSale.total_amount) - Number(pendingSale.paid_amount))
+    : paymentTotal;
+  const currentPaymentAttempts = pendingSale
+    ? paymentAttempts.filter((payment) => payment.sale_id === pendingSale.id)
+    : [];
+  const pendingMpesaAttempt = currentPaymentAttempts.find(
+    (payment) => payment.method === "mpesa" && payment.status === "pending",
+  );
   const isRecoveringPendingSale = Boolean(pendingSale && cart.length === 0);
   const splitCashAmount = Number(splitAmounts.cash) || 0;
   const splitMpesaAmount = Number(splitAmounts.mpesa) || 0;
   const splitCardAmount = Number(splitAmounts.card) || 0;
   const splitTotal = splitCashAmount + splitMpesaAmount + splitCardAmount;
-  const splitBalance = total - splitTotal;
+  const splitBalance = paymentOutstanding - splitTotal;
 
   async function refreshRecentSales() {
     if (!token || isPreview || !user?.branch_id) return;
@@ -266,6 +290,21 @@ export function PosPage() {
       setNotice(error instanceof Error ? error.message : "Could not load recent sales.");
     } finally {
       setHistoryBusy(false);
+    }
+  }
+
+  async function refreshPaymentAttempts(saleId: string) {
+    if (!token || isPreview) return;
+    setAttemptsBusy(true);
+    try {
+      const attempts = await listSalePayments(token, saleId);
+      setPaymentAttempts(attempts);
+    } catch (error) {
+      setNotice(
+        error instanceof Error ? error.message : "Could not load payment attempts.",
+      );
+    } finally {
+      setAttemptsBusy(false);
     }
   }
 
@@ -304,6 +343,7 @@ export function PosPage() {
       `Enter the customer's M-Pesa receipt code to complete ${sale.invoice_number}.`,
     );
     setPaymentOpen(true);
+    void refreshPaymentAttempts(sale.id);
   }
 
   function printReceipt() {
@@ -462,6 +502,7 @@ export function PosPage() {
         })),
       }));
     setPendingSale(sale);
+    void refreshPaymentAttempts(sale.id);
     return sale;
   }
 
@@ -474,6 +515,7 @@ export function PosPage() {
     setPaymentReference("");
     setMpesaPhone("");
     setMpesaReceiptCode("");
+    setPaymentAttempts([]);
     setSplitAmounts({ cash: "", mpesa: "", card: "" });
     setSplitCardReference("");
     setPaymentStatus(null);
@@ -498,10 +540,12 @@ export function PosPage() {
         return true;
       }
       if (["cancelled", "voided", "refunded"].includes(latestSale.status)) {
+        await refreshPaymentAttempts(saleId);
         return false;
       }
     }
 
+    await refreshPaymentAttempts(saleId);
     return false;
   }
 
@@ -547,6 +591,129 @@ export function PosPage() {
     }
   }
 
+  async function checkMpesaAttempt(payment: Payment) {
+    if (!token || !payment.sale_id) return;
+
+    setPaymentBusy(true);
+    setPaymentStatus("Checking M-Pesa status with Daraja...");
+    try {
+      const result = await queryMpesaPaymentStatus(token, payment.id);
+      setPaymentAttempts((current) => [
+        result.payment,
+        ...current.filter((item) => item.id !== result.payment.id),
+      ]);
+      const latestSale = await getPosSale(token, payment.sale_id);
+      if (latestSale.status === "completed") {
+        await completeSaleReceipt(
+          latestSale.id,
+          "M-Pesa status query confirmed payment. Receipt generated.",
+        );
+        return;
+      }
+      setPendingSale(latestSale);
+      await refreshPaymentAttempts(latestSale.id);
+      setPaymentStatus(result.customer_message);
+      setNotice(result.customer_message);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not check M-Pesa status.";
+      setPaymentStatus(message);
+      setNotice(message);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function markAttemptOutcome(
+    payment: Payment,
+    status: "failed" | "cancelled",
+    notes: string,
+  ) {
+    if (!token || !payment.sale_id) return;
+
+    setPaymentBusy(true);
+    setPaymentStatus(
+      status === "cancelled"
+        ? "Marking prompt as cancelled..."
+        : "Marking attempt as failed...",
+    );
+    try {
+      const updated = await markPaymentAttemptOutcome(token, payment.id, {
+        status,
+        notes,
+      });
+      setPaymentAttempts((current) => [
+        updated,
+        ...current.filter((item) => item.id !== updated.id),
+      ]);
+      const latestSale = await getPosSale(token, payment.sale_id);
+      setPendingSale(latestSale);
+      await refreshPaymentAttempts(latestSale.id);
+      const message =
+        status === "cancelled"
+          ? "Payment attempt cancelled. You can retry or choose another method."
+          : "Payment attempt failed. You can retry or choose another method.";
+      setPaymentStatus(message);
+      setNotice(message);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not update payment attempt.";
+      setPaymentStatus(message);
+      setNotice(message);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
+  async function recordCardDecline() {
+    if (!token || isPreview) {
+      setNotice("Preview mode does not record card declines.");
+      return;
+    }
+    if (!user?.branch_id || !tillSession) {
+      setNotice("A branch and open till session are required before card payment.");
+      return;
+    }
+
+    setPaymentBusy(true);
+    setPaymentStatus("Recording declined card attempt...");
+    try {
+      const sale = await ensurePendingSale();
+      const amount = Math.max(
+        0,
+        Number(sale.total_amount) - Number(sale.paid_amount),
+      );
+      if (amount <= 0) {
+        setPaymentStatus("This sale has no outstanding balance.");
+        return;
+      }
+      const failed = await recordFailedPaymentAttempt(token, sale.id, {
+        method: "card",
+        amount,
+        status: "failed",
+        provider_reference: paymentReference.trim() || null,
+        idempotency_key: idempotencyKey(),
+        notes: "Card declined at payment terminal.",
+      });
+      setPaymentAttempts((current) => [
+        failed,
+        ...current.filter((payment) => payment.id !== failed.id),
+      ]);
+      const latestSale = await getPosSale(token, sale.id);
+      setPendingSale(latestSale);
+      await refreshPaymentAttempts(latestSale.id);
+      setPaymentStatus("Card decline recorded. Choose another method or retry card.");
+      setNotice("Card decline recorded. Choose another method or retry card.");
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not record card decline.";
+      setPaymentStatus(message);
+      setNotice(message);
+    } finally {
+      setPaymentBusy(false);
+    }
+  }
+
   async function recordImmediatePayment(
     saleId: string,
     method: "cash" | "card",
@@ -584,7 +751,7 @@ export function PosPage() {
 
     if (paymentMethod === "split") {
       const splitCents = Math.round(splitTotal * 100);
-      const totalCents = Math.round(total * 100);
+      const totalCents = Math.round(paymentOutstanding * 100);
       if (splitCents !== totalCents) {
         setNotice(`Split payments must equal the sale total. Balance: ${money(splitBalance)}.`);
         return;
@@ -613,10 +780,30 @@ export function PosPage() {
       return;
     }
 
+    if (
+      pendingMpesaAttempt &&
+      (paymentMethod === "mpesa" ||
+        (paymentMethod === "split" && splitMpesaAmount > 0))
+    ) {
+      setNotice(
+        "A M-Pesa prompt is already pending. Check its status or mark it cancelled before retrying.",
+      );
+      return;
+    }
+
     setPaymentBusy(true);
     setPaymentStatus("Preparing payment...");
     try {
       const sale = await ensurePendingSale();
+      const outstanding = Math.max(
+        0,
+        Number(sale.total_amount) - Number(sale.paid_amount),
+      );
+      if (outstanding <= 0) {
+        setNotice("This sale has no outstanding balance.");
+        setPaymentStatus("This sale has no outstanding balance.");
+        return;
+      }
 
       if (paymentMethod === "split") {
         await recordImmediatePayment(sale.id, "cash", splitCashAmount);
@@ -635,6 +822,10 @@ export function PosPage() {
             idempotency_key: idempotencyKey(),
             notes: `Split M-Pesa payment for ${sale.invoice_number}`,
           });
+          setPaymentAttempts((current) => [
+            prompt.payment,
+            ...current.filter((payment) => payment.id !== prompt.payment.id),
+          ]);
           setPaymentStatus(prompt.customer_message);
           setNotice(prompt.customer_message);
           const completed = await waitForMpesaCompletion(sale.id);
@@ -657,10 +848,14 @@ export function PosPage() {
         setPaymentStatus("Sending M-Pesa prompt to customer...");
         const prompt = await sendMpesaStkPush(token, sale.id, {
           phone_number: mpesaPhone.trim(),
-          amount: sale.total_amount,
+          amount: outstanding,
           idempotency_key: idempotencyKey(),
           notes: `POS M-Pesa payment for ${sale.invoice_number}`,
         });
+        setPaymentAttempts((current) => [
+          prompt.payment,
+          ...current.filter((payment) => payment.id !== prompt.payment.id),
+        ]);
         setPaymentStatus(prompt.customer_message);
         setNotice(prompt.customer_message);
         const completed = await waitForMpesaCompletion(sale.id);
@@ -675,7 +870,7 @@ export function PosPage() {
 
       await addSalePayment(token, sale.id, {
         method: paymentMethod,
-        amount: sale.total_amount,
+        amount: outstanding,
         provider_reference: paymentMethod === "cash" ? null : paymentReference.trim(),
         idempotency_key: idempotencyKey(),
         notes: `POS ${paymentMethod} payment`,
@@ -1342,6 +1537,91 @@ export function PosPage() {
                     <span>{paymentStatus}</span>
                   </div>
                 )}
+                {pendingSale && (
+                  <section className="payment-attempts-panel">
+                    <header>
+                      <div>
+                        <strong>Payment attempts</strong>
+                        <span>
+                          Outstanding {money(paymentOutstanding)} / Paid{" "}
+                          {money(Number(pendingSale.paid_amount))}
+                        </span>
+                      </div>
+                      <button
+                        type="button"
+                        disabled={attemptsBusy}
+                        onClick={() => void refreshPaymentAttempts(pendingSale.id)}
+                      >
+                        {attemptsBusy ? "Loading..." : "Refresh"}
+                      </button>
+                    </header>
+
+                    {currentPaymentAttempts.length === 0 && (
+                      <div className="payment-attempts-empty">
+                        No payment attempts recorded yet.
+                      </div>
+                    )}
+
+                    {currentPaymentAttempts.map((attempt) => (
+                      <article className="payment-attempt-row" key={attempt.id}>
+                        <div>
+                          <strong>
+                            {attempt.method.replace(/_/g, " ").toUpperCase()} /{" "}
+                            {money(Number(attempt.amount))}
+                          </strong>
+                          <span>
+                            {attempt.provider_reference
+                              ? `Ref ${attempt.provider_reference}`
+                              : "No provider reference"}
+                          </span>
+                          {attempt.notes && <span>{attempt.notes}</span>}
+                        </div>
+                        <StatusPill tone={paymentStatusTone(attempt.status)}>
+                          {attempt.status.replace(/_/g, " ")}
+                        </StatusPill>
+                        {attempt.status === "pending" && (
+                          <div className="payment-attempt-actions">
+                            {attempt.method === "mpesa" && (
+                              <button
+                                type="button"
+                                disabled={paymentBusy}
+                                onClick={() => void checkMpesaAttempt(attempt)}
+                              >
+                                Check Status
+                              </button>
+                            )}
+                            <button
+                              type="button"
+                              disabled={paymentBusy}
+                              onClick={() =>
+                                void markAttemptOutcome(
+                                  attempt,
+                                  "cancelled",
+                                  "Cashier marked this attempt as cancelled by the customer.",
+                                )
+                              }
+                            >
+                              Customer Cancelled
+                            </button>
+                            <button
+                              type="button"
+                              disabled={paymentBusy}
+                              onClick={() =>
+                                void markAttemptOutcome(
+                                  attempt,
+                                  "failed",
+                                  "Cashier marked this attempt as timed out or declined.",
+                                )
+                              }
+                            >
+                              Mark Failed
+                            </button>
+                          </div>
+                        )}
+                      </article>
+                    ))}
+                  </section>
+                )}
                 {paymentMethod === "split" && (
                   <section className="split-payment-panel">
                     <div>
@@ -1429,14 +1709,24 @@ export function PosPage() {
                   </label>
                 )}
                 {paymentMethod === "card" && (
-                  <label className="payment-reference">
-                    Card reference
-                    <input
-                      value={paymentReference}
-                      onChange={(event) => setPaymentReference(event.target.value)}
-                      placeholder="Card approval/reference number"
-                    />
-                  </label>
+                  <section className="card-payment-panel">
+                    <label className="payment-reference">
+                      Card reference
+                      <input
+                        value={paymentReference}
+                        onChange={(event) => setPaymentReference(event.target.value)}
+                        placeholder="Card approval/reference number"
+                      />
+                    </label>
+                    <button
+                      type="button"
+                      className="danger-button"
+                      disabled={paymentBusy}
+                      onClick={() => void recordCardDecline()}
+                    >
+                      Card Declined
+                    </button>
+                  </section>
                 )}
                 {pendingSale &&
                   (paymentMethod === "mpesa" ||

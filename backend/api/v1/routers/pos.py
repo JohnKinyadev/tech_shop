@@ -9,9 +9,12 @@ from backend.schemas.approval_schemas import ApprovalDecision, ApprovalRequestRe
 from backend.schemas.base_schemas import Page
 from backend.schemas.customer_schemas import CustomerCreate, CustomerResponse
 from backend.schemas.payments_schemas import (
+    FailedPaymentAttemptCreate,
     MpesaManualConfirmCreate,
     MpesaStkPushCreate,
+    MpesaStkQueryResponse,
     MpesaStkPushResponse,
+    PaymentAttemptOutcomeUpdate,
     PaymentResponse,
     SalePaymentCreate,
 )
@@ -248,6 +251,45 @@ def add_sale_payment(
     return item
 
 
+@router.get("/sales/{sale_id}/payments", response_model=list[PaymentResponse])
+def list_sale_payments(
+    sale_id: UUID,
+    principal: SalesPrincipal,
+    db: DatabaseSession,
+) -> list[PaymentResponse]:
+    return sale_service.list_payments(db, principal, sale_id)
+
+
+@router.post(
+    "/sales/{sale_id}/payment-attempts/failed",
+    response_model=PaymentResponse,
+    status_code=status.HTTP_201_CREATED,
+)
+def record_failed_payment_attempt(
+    sale_id: UUID,
+    payload: FailedPaymentAttemptCreate,
+    principal: SalesPrincipal,
+    db: DatabaseSession,
+) -> PaymentResponse:
+    item = sale_service.record_failed_payment_attempt(db, principal, sale_id, payload)
+    db.commit()
+    return item
+
+
+@router.post("/payments/{payment_id}/outcome", response_model=PaymentResponse)
+def mark_payment_attempt_outcome(
+    payment_id: UUID,
+    payload: PaymentAttemptOutcomeUpdate,
+    principal: SalesPrincipal,
+    db: DatabaseSession,
+) -> PaymentResponse:
+    item = sale_service.mark_payment_attempt_unsuccessful(
+        db, principal, payment_id, payload
+    )
+    db.commit()
+    return item
+
+
 @router.post("/sales/{sale_id}/mpesa/stk-push", response_model=MpesaStkPushResponse)
 def send_mpesa_stk_push(
     sale_id: UUID,
@@ -256,6 +298,17 @@ def send_mpesa_stk_push(
     db: DatabaseSession,
 ) -> MpesaStkPushResponse:
     item = mpesa_service.initiate_sale_stk_push(db, principal, sale_id, payload)
+    db.commit()
+    return item
+
+
+@router.post("/payments/{payment_id}/mpesa/query", response_model=MpesaStkQueryResponse)
+def query_mpesa_payment_status(
+    payment_id: UUID,
+    principal: SalesPrincipal,
+    db: DatabaseSession,
+) -> MpesaStkQueryResponse:
+    item = mpesa_service.query_sale_stk_payment(db, principal, payment_id)
     db.commit()
     return item
 

@@ -259,6 +259,20 @@ export type SalePaymentPayload = {
   notes?: string | null;
 };
 
+export type FailedPaymentAttemptPayload = {
+  method: "mpesa" | "card" | "bank_transfer" | "store_credit";
+  amount: string | number;
+  status: "failed" | "cancelled";
+  provider_reference?: string | null;
+  idempotency_key: string;
+  notes?: string | null;
+};
+
+export type PaymentAttemptOutcomePayload = {
+  status: "failed" | "cancelled";
+  notes?: string | null;
+};
+
 export type MpesaStkPushPayload = {
   phone_number: string;
   amount: string | number;
@@ -291,6 +305,14 @@ export type MpesaStkPushResponse = {
   payment: Payment;
   merchant_request_id: string;
   checkout_request_id: string;
+  customer_message: string;
+};
+
+export type MpesaStkQueryResponse = {
+  payment: Payment;
+  checkout_request_id: string;
+  result_code: number | null;
+  result_description: string;
   customer_message: string;
 };
 

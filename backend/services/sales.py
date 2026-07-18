@@ -26,7 +26,12 @@ from backend.models.products import Product, ProductVariant
 from backend.models.sales import Sale, SaleItem, Till, TillSession
 from backend.models.users import User
 from backend.models.warranty import Warranty
-from backend.schemas.payments_schemas import PaymentResponse, SalePaymentCreate
+from backend.schemas.payments_schemas import (
+    FailedPaymentAttemptCreate,
+    PaymentAttemptOutcomeUpdate,
+    PaymentResponse,
+    SalePaymentCreate,
+)
 from backend.schemas.sales_schemas import (
     POSSaleItemResponse,
     POSSaleResponse,
@@ -127,6 +132,48 @@ def list_sales(
 
 def get_sale(db: Session, principal: AuthPrincipal, sale_id: UUID) -> POSSaleResponse:
     return sale_response(db, get_sale_model(db, principal, sale_id))
+
+
+def list_payments(
+    db: Session, principal: AuthPrincipal, sale_id: UUID
+) -> list[PaymentResponse]:
+    sale = get_sale_model(db, principal, sale_id)
+    payments = db.scalars(
+        select(Payment)
+        .where(Payment.sale_id == sale.id, Payment.is_deleted.is_(False))
+        .order_by(Payment.created_at.desc())
+    ).all()
+    return [PaymentResponse.model_validate(payment) for payment in payments]
+
+
+def _append_note(existing: str | None, note: str | None) -> str | None:
+    clean_note = note.strip() if note else ""
+    if not clean_note:
+        return existing
+    if not existing:
+        return clean_note
+    return f"{existing}\n{clean_note}"
+
+
+def _get_sale_payment(
+    db: Session,
+    principal: AuthPrincipal,
+    payment_id: UUID,
+    *,
+    lock: bool = False,
+) -> tuple[Sale, Payment]:
+    statement = select(Payment).where(
+        Payment.id == payment_id, Payment.is_deleted.is_(False)
+    )
+    if lock:
+        statement = statement.with_for_update()
+    payment = db.scalar(statement)
+    if payment is None:
+        raise NotFoundError("payment not found")
+    if payment.sale_id is None:
+        raise ConflictError("payment is not linked to a sale")
+    sale = get_sale_model(db, principal, payment.sale_id, lock=lock)
+    return sale, payment
 
 
 def create_sale(
@@ -373,6 +420,108 @@ def _complete_sale_if_fully_paid(
     sale.completed_at = now
 
 
+def record_failed_payment_attempt(
+    db: Session,
+    principal: AuthPrincipal,
+    sale_id: UUID,
+    payload: FailedPaymentAttemptCreate,
+) -> PaymentResponse:
+    sale = get_sale_model(db, principal, sale_id, lock=True)
+    existing = db.scalar(
+        select(Payment).where(Payment.idempotency_key == payload.idempotency_key)
+    )
+    if existing is not None:
+        if existing.sale_id != sale.id:
+            raise ConflictError("payment idempotency key is already in use")
+        return PaymentResponse.model_validate(existing)
+    if sale.status != SaleStatus.PENDING_PAYMENT:
+        raise ConflictError("this sale is not awaiting payment")
+
+    outstanding = money(sale.total_amount - sale.paid_amount)
+    amount = money(payload.amount)
+    if amount > outstanding:
+        raise ValidationError("payment attempt exceeds the outstanding sale amount")
+    if payload.provider_reference and db.scalar(
+        select(Payment.id).where(
+            Payment.provider_reference == payload.provider_reference,
+            Payment.is_deleted.is_(False),
+        )
+    ):
+        raise ConflictError("payment provider reference is already in use")
+
+    payment = Payment(
+        branch_id=sale.branch_id,
+        sale_id=sale.id,
+        till_session_id=sale.till_session_id,
+        direction=PaymentDirection.INCOMING,
+        method=payload.method,
+        status=payload.status,
+        amount=amount,
+        currency="KES",
+        provider_reference=payload.provider_reference,
+        idempotency_key=payload.idempotency_key,
+        notes=payload.notes,
+    )
+    db.add(payment)
+    db.flush()
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=sale.branch_id,
+        action="sale.payment_attempt_unsuccessful",
+        resource_type="payment",
+        resource_id=payment.id,
+        after={
+            "sale_id": str(sale.id),
+            "method": payment.method.value,
+            "status": payment.status.value,
+            "amount": str(payment.amount),
+        },
+    )
+    return PaymentResponse.model_validate(payment)
+
+
+def mark_payment_attempt_unsuccessful(
+    db: Session,
+    principal: AuthPrincipal,
+    payment_id: UUID,
+    payload: PaymentAttemptOutcomeUpdate,
+) -> PaymentResponse:
+    sale, payment = _get_sale_payment(db, principal, payment_id, lock=True)
+    if payment.status == PaymentStatus.COMPLETED:
+        raise ConflictError("completed payments cannot be marked unsuccessful")
+    if payment.status in {PaymentStatus.FAILED, PaymentStatus.CANCELLED}:
+        return PaymentResponse.model_validate(payment)
+    if payment.status != PaymentStatus.PENDING:
+        raise ConflictError("only pending payments can be marked unsuccessful")
+
+    now = datetime.now(timezone.utc)
+    payment.status = payload.status
+    payment.notes = _append_note(payment.notes, payload.notes)
+    payment.provider_payload = {
+        **(payment.provider_payload or {}),
+        "manual_outcome": payload.status.value,
+        "manual_outcome_by": str(principal.user_id),
+        "manual_outcome_at": now.isoformat(),
+        "manual_outcome_notes": payload.notes,
+    }
+    db.flush()
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=sale.branch_id,
+        action="sale.payment_attempt_unsuccessful",
+        resource_type="payment",
+        resource_id=payment.id,
+        after={
+            "sale_id": str(sale.id),
+            "method": payment.method.value,
+            "status": payment.status.value,
+        },
+    )
+    return PaymentResponse.model_validate(payment)
+
+
 def complete_pending_payment(
     db: Session,
     payment: Payment,
@@ -382,6 +531,25 @@ def complete_pending_payment(
     paid_at: datetime | None = None,
 ) -> PaymentResponse:
     if payment.status == PaymentStatus.COMPLETED:
+        if provider_reference and provider_reference != payment.provider_reference:
+            duplicate = db.scalar(
+                select(Payment.id).where(
+                    Payment.provider_reference == provider_reference,
+                    Payment.id != payment.id,
+                    Payment.is_deleted.is_(False),
+                )
+            )
+            if duplicate is not None:
+                raise ConflictError("payment provider reference is already in use")
+            payment.provider_reference = provider_reference
+        if provider_payload:
+            payment.provider_payload = {
+                **(payment.provider_payload or {}),
+                **provider_payload,
+            }
+        if paid_at and payment.paid_at is None:
+            payment.paid_at = paid_at
+        db.flush()
         return PaymentResponse.model_validate(payment)
     if payment.status != PaymentStatus.PENDING:
         raise ConflictError("only pending payments can be completed")

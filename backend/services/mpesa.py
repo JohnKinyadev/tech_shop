@@ -20,6 +20,7 @@ from backend.models.sales import Sale
 from backend.schemas.payments_schemas import (
     MpesaManualConfirmCreate,
     MpesaStkPushCreate,
+    MpesaStkQueryResponse,
     MpesaStkPushResponse,
     PaymentResponse,
 )
@@ -29,6 +30,8 @@ from backend.services.auth import AuthPrincipal
 from backend.services.exceptions import ConflictError, NotFoundError, ValidationError
 
 NAIROBI_TZ = ZoneInfo("Africa/Nairobi")
+MPESA_PENDING_RESULT_CODES = {499}
+MPESA_CANCELLED_RESULT_CODES = {1032}
 
 
 def _configured_value(value: str | None, label: str) -> str:
@@ -58,6 +61,15 @@ def _mpesa_amount(amount: Decimal) -> int:
     if whole_amount <= 0:
         raise ValidationError("M-Pesa amount must be at least KES 1")
     return int(whole_amount)
+
+
+def _result_code(value: object) -> int | None:
+    if value is None:
+        return None
+    try:
+        return int(value)
+    except (TypeError, ValueError):
+        return None
 
 
 def _timestamp() -> str:
@@ -126,6 +138,19 @@ def initiate_sale_stk_push(
 
     if sale.status != SaleStatus.PENDING_PAYMENT:
         raise ConflictError("this sale is not awaiting payment")
+    pending_mpesa = db.scalar(
+        select(Payment.id).where(
+            Payment.sale_id == sale.id,
+            Payment.method == PaymentMethod.MPESA,
+            Payment.status == PaymentStatus.PENDING,
+            Payment.is_deleted.is_(False),
+        )
+    )
+    if pending_mpesa is not None:
+        raise ConflictError(
+            "a M-Pesa prompt is already pending; check its status or mark it "
+            "cancelled before retrying"
+        )
 
     outstanding = sales.money(sale.total_amount - sale.paid_amount)
     amount = sales.money(payload.amount)
@@ -312,6 +337,152 @@ def manually_confirm_sale_payment(
     return completed
 
 
+def _checkout_request_id(payment: Payment) -> str:
+    provider_payload = payment.provider_payload or {}
+    return str(
+        provider_payload.get("checkout_request_id") or payment.provider_reference or ""
+    )
+
+
+def query_sale_stk_payment(
+    db: Session,
+    principal: AuthPrincipal,
+    payment_id: UUID,
+) -> MpesaStkQueryResponse:
+    payment = db.scalar(
+        select(Payment)
+        .where(Payment.id == payment_id, Payment.is_deleted.is_(False))
+        .with_for_update()
+    )
+    if payment is None:
+        raise NotFoundError("payment not found")
+    if payment.sale_id is None:
+        raise ConflictError("payment is not linked to a sale")
+    sale = sales.get_sale_model(db, principal, payment.sale_id, lock=True)
+    if payment.method != PaymentMethod.MPESA:
+        raise ConflictError("only M-Pesa payments can be queried")
+
+    checkout_request_id = _checkout_request_id(payment)
+    if not checkout_request_id:
+        raise ValidationError("M-Pesa checkout request id is missing")
+
+    if payment.status != PaymentStatus.PENDING:
+        return MpesaStkQueryResponse(
+            payment=PaymentResponse.model_validate(payment),
+            checkout_request_id=checkout_request_id,
+            result_code=None,
+            result_description=f"M-Pesa payment is already {payment.status.value}.",
+            customer_message=f"M-Pesa payment is already {payment.status.value}.",
+        )
+
+    shortcode = settings.mpesa_shortcode.strip()
+    passkey = _configured_value(settings.mpesa_passkey, "passkey")
+    timestamp = _timestamp()
+    request_payload = {
+        "BusinessShortCode": shortcode,
+        "Password": _password(shortcode, passkey, timestamp),
+        "Timestamp": timestamp,
+        "CheckoutRequestID": checkout_request_id,
+    }
+    try:
+        response = httpx.post(
+            f"{settings.mpesa_base_url}/mpesa/stkpushquery/v1/query",
+            headers={"Authorization": f"Bearer {_access_token()}"},
+            json=request_payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ValidationError("could not query M-Pesa STK Push status") from exc
+
+    response_payload = response.json()
+    response_code = str(response_payload.get("ResponseCode") or "")
+    if response_code and response_code != "0":
+        message = (
+            response_payload.get("errorMessage")
+            or response_payload.get("ResponseDescription")
+            or "M-Pesa rejected the STK status query"
+        )
+        raise ValidationError(str(message))
+
+    result_code = _result_code(response_payload.get("ResultCode"))
+    result_description = str(
+        response_payload.get("ResultDesc")
+        or response_payload.get("ResponseDescription")
+        or "M-Pesa query completed."
+    )
+    provider_payload = {
+        **(payment.provider_payload or {}),
+        "stk_query": response_payload,
+        "stk_query_result_code": result_code,
+        "stk_query_result_description": result_description,
+        "stk_query_checked_by": str(principal.user_id),
+        "stk_query_checked_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    if result_code == 0:
+        completed = sales.complete_pending_payment(
+            db,
+            payment,
+            provider_reference=payment.provider_reference,
+            provider_payload=provider_payload,
+            paid_at=datetime.now(timezone.utc),
+        )
+        customer_message = "M-Pesa confirmed by status query. Receipt can be generated."
+        return MpesaStkQueryResponse(
+            payment=completed,
+            checkout_request_id=checkout_request_id,
+            result_code=result_code,
+            result_description=result_description,
+            customer_message=customer_message,
+        )
+
+    if result_code in MPESA_PENDING_RESULT_CODES or result_code is None:
+        payment.provider_payload = provider_payload
+        db.flush()
+        return MpesaStkQueryResponse(
+            payment=PaymentResponse.model_validate(payment),
+            checkout_request_id=checkout_request_id,
+            result_code=result_code,
+            result_description=result_description,
+            customer_message="M-Pesa is still processing this prompt.",
+        )
+
+    payment.status = (
+        PaymentStatus.CANCELLED
+        if result_code in MPESA_CANCELLED_RESULT_CODES
+        else PaymentStatus.FAILED
+    )
+    payment.provider_payload = provider_payload
+    payment.notes = result_description
+    db.flush()
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=sale.branch_id,
+        action="mpesa.stk_push_status_checked",
+        resource_type="payment",
+        resource_id=payment.id,
+        after={
+            "sale_id": str(sale.id),
+            "checkout_request_id": checkout_request_id,
+            "result_code": result_code,
+            "status": payment.status.value,
+        },
+    )
+    return MpesaStkQueryResponse(
+        payment=PaymentResponse.model_validate(payment),
+        checkout_request_id=checkout_request_id,
+        result_code=result_code,
+        result_description=result_description,
+        customer_message=(
+            "M-Pesa prompt was cancelled."
+            if payment.status == PaymentStatus.CANCELLED
+            else "M-Pesa prompt failed. Choose another method or retry."
+        ),
+    )
+
+
 def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
     callback = payload.get("Body", {}).get("stkCallback", {})
     checkout_request_id = str(callback.get("CheckoutRequestID") or "")
@@ -343,7 +514,19 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
 
     if result_code != 0:
         sale = db.get(Sale, payment.sale_id) if payment.sale_id else None
-        payment.status = PaymentStatus.FAILED
+        if payment.status == PaymentStatus.COMPLETED:
+            payment.provider_payload = provider_payload
+            db.flush()
+            return {
+                "matched": True,
+                "status": payment.status.value,
+                "checkout_request_id": checkout_request_id,
+            }
+        payment.status = (
+            PaymentStatus.CANCELLED
+            if result_code in MPESA_CANCELLED_RESULT_CODES
+            else PaymentStatus.FAILED
+        )
         payment.provider_payload = provider_payload
         db.flush()
         record_audit(
@@ -368,6 +551,46 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
     metadata = _callback_metadata(callback)
     receipt_number = str(metadata.get("MpesaReceiptNumber") or checkout_request_id)
     provider_payload["metadata"] = metadata
+    if payment.status in {PaymentStatus.FAILED, PaymentStatus.CANCELLED}:
+        sale = db.get(Sale, payment.sale_id) if payment.sale_id else None
+        outstanding = (
+            sales.money(sale.total_amount - sale.paid_amount)
+            if sale is not None
+            else Decimal("0.00")
+        )
+        if (
+            sale is not None
+            and sale.status == SaleStatus.PENDING_PAYMENT
+            and payment.amount <= outstanding
+        ):
+            payment.status = PaymentStatus.PENDING
+        else:
+            payment.provider_payload = {
+                **provider_payload,
+                "late_success_after_unsuccessful": True,
+                "late_success_needs_review": True,
+            }
+            db.flush()
+            record_audit(
+                db,
+                actor_id=sale.cashier_id if sale else None,
+                branch_id=payment.branch_id,
+                action="mpesa.late_success_needs_review",
+                resource_type="payment",
+                resource_id=payment.id,
+                after={
+                    "checkout_request_id": checkout_request_id,
+                    "provider_reference": receipt_number,
+                    "current_status": payment.status.value,
+                },
+            )
+            return {
+                "matched": True,
+                "status": "late_success_needs_review",
+                "checkout_request_id": checkout_request_id,
+                "provider_reference": receipt_number,
+            }
+
     completed = sales.complete_pending_payment(
         db,
         payment,

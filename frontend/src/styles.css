@@ -2777,6 +2777,67 @@ button:disabled {
   line-height: 1.45;
 }
 
+.payment-attempts-panel {
+  display: grid;
+  gap: 8px;
+  margin-bottom: 14px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.payment-attempts-panel header,
+.payment-attempt-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 8px;
+  align-items: center;
+}
+
+.payment-attempts-panel header div,
+.payment-attempt-row div {
+  display: grid;
+  gap: 3px;
+}
+
+.payment-attempts-panel header span,
+.payment-attempt-row span,
+.payment-attempts-empty {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.payment-attempts-panel header button,
+.payment-attempt-actions button {
+  min-height: 30px;
+  padding: 4px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  font-weight: 700;
+}
+
+.payment-attempt-row {
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.payment-attempt-row .payment-attempt-actions {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.payment-attempts-empty {
+  padding: 8px;
+  border: 1px dashed var(--line);
+  border-radius: var(--radius);
+}
+
 .split-payment-panel {
   display: grid;
   grid-template-columns: repeat(2, minmax(0, 1fr));
@@ -2828,6 +2889,20 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   outline: none;
+}
+
+.card-payment-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.card-payment-panel .payment-reference {
+  margin-bottom: 0;
+}
+
+.card-payment-panel .danger-button {
+  justify-self: start;
 }
 
 .manual-mpesa-panel {

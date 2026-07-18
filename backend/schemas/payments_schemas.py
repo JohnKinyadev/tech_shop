@@ -37,6 +37,34 @@ class SalePaymentCreate(BaseSchema):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class FailedPaymentAttemptCreate(BaseSchema):
+    method: PaymentMethod
+    amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
+    status: PaymentStatus = PaymentStatus.FAILED
+    provider_reference: str | None = Field(default=None, max_length=150)
+    idempotency_key: str = Field(min_length=8, max_length=150)
+    notes: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def valid_failed_attempt(self) -> "FailedPaymentAttemptCreate":
+        if self.status not in {PaymentStatus.FAILED, PaymentStatus.CANCELLED}:
+            raise ValueError("failed attempts can only be failed or cancelled")
+        if self.method == PaymentMethod.CASH:
+            raise ValueError("cash should not be recorded as a failed payment attempt")
+        return self
+
+
+class PaymentAttemptOutcomeUpdate(BaseSchema):
+    status: PaymentStatus
+    notes: str | None = Field(default=None, max_length=500)
+
+    @model_validator(mode="after")
+    def valid_outcome(self) -> "PaymentAttemptOutcomeUpdate":
+        if self.status not in {PaymentStatus.FAILED, PaymentStatus.CANCELLED}:
+            raise ValueError("payment outcome can only be failed or cancelled")
+        return self
+
+
 class PaymentResponse(ModelResponse):
     branch_id: UUID
     sale_id: UUID | None
@@ -70,3 +98,11 @@ class MpesaStkPushResponse(BaseSchema):
 class MpesaManualConfirmCreate(BaseSchema):
     provider_reference: str = Field(min_length=5, max_length=150)
     notes: str | None = Field(default=None, max_length=500)
+
+
+class MpesaStkQueryResponse(BaseSchema):
+    payment: PaymentResponse
+    checkout_request_id: str
+    result_code: int | None
+    result_description: str
+    customer_message: str

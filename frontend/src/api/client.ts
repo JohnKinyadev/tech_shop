@@ -22,14 +22,17 @@ import type {
   ExpenseDecisionPayload,
   ExpenseSummary,
   ExpenseUpdatePayload,
+  FailedPaymentAttemptPayload,
   GoodsReceipt,
   GoodsReceiptPayload,
   InventoryBalance,
   MpesaManualConfirmPayload,
   MpesaStkPushPayload,
+  MpesaStkQueryResponse,
   MpesaStkPushResponse,
   Page,
   Payment,
+  PaymentAttemptOutcomePayload,
   Permission,
   Product,
   ProductCreatePayload,
@@ -330,6 +333,34 @@ export function addSalePayment(
   });
 }
 
+export function listSalePayments(token: string, saleId: string) {
+  return apiRequest<Payment[]>(`/pos/sales/${saleId}/payments`, { token });
+}
+
+export function recordFailedPaymentAttempt(
+  token: string,
+  saleId: string,
+  body: FailedPaymentAttemptPayload,
+) {
+  return apiRequest<Payment>(`/pos/sales/${saleId}/payment-attempts/failed`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function markPaymentAttemptOutcome(
+  token: string,
+  paymentId: string,
+  body: PaymentAttemptOutcomePayload,
+) {
+  return apiRequest<Payment>(`/pos/payments/${paymentId}/outcome`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
 export function sendMpesaStkPush(
   token: string,
   saleId: string,
@@ -339,6 +370,13 @@ export function sendMpesaStkPush(
     token,
     method: "POST",
     body,
+  });
+}
+
+export function queryMpesaPaymentStatus(token: string, paymentId: string) {
+  return apiRequest<MpesaStkQueryResponse>(`/pos/payments/${paymentId}/mpesa/query`, {
+    token,
+    method: "POST",
   });
 }
 
