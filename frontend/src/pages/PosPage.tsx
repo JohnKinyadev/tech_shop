@@ -3,6 +3,7 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 import {
   ApiError,
   addSalePayment,
+  cancelPosSale,
   closeTillSession,
   createCustomer,
   createPosSale,
@@ -48,6 +49,17 @@ type CartItem = PosProduct & {
 type PaymentMethod = "cash" | "mpesa" | "card" | "split";
 type SplitMethod = "cash" | "mpesa" | "card";
 type PosWorkspaceTab = "products" | "receipts" | "held";
+type SalesHistoryStatus = "all" | "completed" | "pending_payment" | "cancelled";
+
+type HeldOrder = {
+  id: string;
+  label: string;
+  cart: CartItem[];
+  customerName: string;
+  customerPhone: string;
+  createdAt: string;
+  total: number;
+};
 
 function money(value: number) {
   return new Intl.NumberFormat("en-KE", {
@@ -151,7 +163,10 @@ export function PosPage() {
   const [receipt, setReceipt] = useState<Receipt | null>(null);
   const [receiptViewer, setReceiptViewer] = useState<Receipt | null>(null);
   const [recentSales, setRecentSales] = useState<PosSale[]>([]);
+  const [historyStatus, setHistoryStatus] = useState<SalesHistoryStatus>("all");
+  const [historySearch, setHistorySearch] = useState("");
   const [historyBusy, setHistoryBusy] = useState(false);
+  const [heldOrders, setHeldOrders] = useState<HeldOrder[]>([]);
   const [pendingSale, setPendingSale] = useState<PosSale | null>(null);
   const [tillSession, setTillSession] = useState<TillSession | null>(null);
   const [tills, setTills] = useState<Till[]>([]);
@@ -231,7 +246,7 @@ export function PosPage() {
 
   useEffect(() => {
     void refreshRecentSales();
-  }, [isPreview, token, user?.branch_id]);
+  }, [historyStatus, isPreview, token, user?.branch_id]);
 
   const categories = useMemo(
     () => ["All", ...Array.from(new Set(products.map((product) => product.category)))],
@@ -254,6 +269,23 @@ export function PosPage() {
       return categoryMatches && textMatches;
     });
   }, [activeCategory, products, query]);
+
+  const filteredRecentSales = useMemo(() => {
+    const needle = historySearch.trim().toLowerCase();
+    return recentSales.filter((sale) => {
+      if (historyStatus !== "all" && sale.status !== historyStatus) return false;
+      if (!needle) return true;
+      return [
+        sale.invoice_number,
+        sale.status,
+        sale.items.map((item) => item.description).join(" "),
+        sale.total_amount,
+      ]
+        .join(" ")
+        .toLowerCase()
+        .includes(needle);
+    });
+  }, [historySearch, historyStatus, recentSales]);
 
   const subtotal = cart.reduce(
     (total, item) => total + item.price * item.quantity,
@@ -284,7 +316,10 @@ export function PosPage() {
     if (!token || isPreview || !user?.branch_id) return;
     setHistoryBusy(true);
     try {
-      const page = await listPosSales(token, user.branch_id);
+      const page = await listPosSales(token, user.branch_id, {
+        pageSize: 30,
+        status: historyStatus === "all" ? undefined : historyStatus,
+      });
       setRecentSales(page.items);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not load recent sales.");
@@ -344,6 +379,109 @@ export function PosPage() {
     );
     setPaymentOpen(true);
     void refreshPaymentAttempts(sale.id);
+  }
+
+  function clearDraftOrder(message = "Cart cleared.") {
+    setCart([]);
+    setCustomerName("");
+    setCustomerPhone("");
+    setPendingSale(null);
+    setPaymentReference("");
+    setMpesaPhone("");
+    setMpesaReceiptCode("");
+    setPaymentAttempts([]);
+    setSplitAmounts({ cash: "", mpesa: "", card: "" });
+    setSplitCardReference("");
+    setPaymentStatus(null);
+    setPaymentOpen(false);
+    setNotice(message);
+  }
+
+  function clearCurrentCart() {
+    if (pendingSale) {
+      setNotice("This sale already has an invoice. Use Cancel Sale instead.");
+      return;
+    }
+    if (!cart.length) {
+      setNotice("The cart is already empty.");
+      return;
+    }
+    clearDraftOrder("Cart cleared.");
+  }
+
+  function holdCurrentOrder() {
+    if (pendingSale) {
+      setNotice("This sale already has an invoice. Cancel or complete it before holding another order.");
+      return;
+    }
+    if (!cart.length) {
+      setNotice("Add items before holding an order.");
+      return;
+    }
+    const heldOrder: HeldOrder = {
+      id: idempotencyKey(),
+      label: customerName.trim() || `Held order ${heldOrders.length + 1}`,
+      cart,
+      customerName,
+      customerPhone,
+      createdAt: new Date().toISOString(),
+      total,
+    };
+    setHeldOrders((current) => [heldOrder, ...current]);
+    clearDraftOrder(`${heldOrder.label} moved to held orders.`);
+    setActiveWorkspaceTab("held");
+  }
+
+  function resumeHeldOrder(order: HeldOrder) {
+    if (pendingSale) {
+      setNotice("Complete or cancel the current invoice before resuming a held order.");
+      return;
+    }
+    if (cart.length) {
+      setNotice("Clear or hold the current cart before resuming another order.");
+      return;
+    }
+    setCart(order.cart);
+    setCustomerName(order.customerName);
+    setCustomerPhone(order.customerPhone);
+    setHeldOrders((current) => current.filter((item) => item.id !== order.id));
+    setReceipt(null);
+    setActiveWorkspaceTab("products");
+    setNotice(`${order.label} resumed.`);
+  }
+
+  function discardHeldOrder(orderId: string) {
+    setHeldOrders((current) => current.filter((item) => item.id !== orderId));
+    setNotice("Held order removed.");
+  }
+
+  async function cancelUnpaidSale(sale?: PosSale | null) {
+    const targetSale = sale ?? pendingSale;
+    if (!token || isPreview || !targetSale) {
+      setNotice("No live unpaid sale is selected to cancel.");
+      return;
+    }
+    if (Number(targetSale.paid_amount) > 0) {
+      setNotice("Partially paid sales cannot be cancelled from POS. Use refund/void approval.");
+      return;
+    }
+
+    setPaymentBusy(true);
+    setHistoryBusy(true);
+    try {
+      const cancelled = await cancelPosSale(token, targetSale.id);
+      if (pendingSale?.id === cancelled.id) {
+        clearDraftOrder(`${cancelled.invoice_number} cancelled.`);
+      } else {
+        setNotice(`${cancelled.invoice_number} cancelled.`);
+      }
+      await refreshRecentSales();
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not cancel sale.");
+    } finally {
+      setPaymentBusy(false);
+      setHistoryBusy(false);
+    }
   }
 
   function printReceipt() {
@@ -925,6 +1063,10 @@ export function PosPage() {
       setNotice("Clear or complete the current cart before closing the till.");
       return;
     }
+    if (heldOrders.length) {
+      setNotice("Resume or discard held orders before closing the till.");
+      return;
+    }
     if (closingCash.trim() === "") {
       setNotice("Enter the counted closing cash before closing the till.");
       return;
@@ -961,7 +1103,13 @@ export function PosPage() {
             <strong>Order 1</strong>
             <span>{cart.length || 0} items</span>
           </button>
-          <button className="orders-tab">Held</button>
+          <button
+            className="orders-tab"
+            onClick={() => setActiveWorkspaceTab("held")}
+          >
+            <strong>Held</strong>
+            <span>{heldOrders.length} orders</span>
+          </button>
           <button className="orders-tab orders-tab--add">+</button>
         </header>
 
@@ -1080,8 +1228,10 @@ export function PosPage() {
           </div>
 
           <div className="order-actions">
-            <button className="danger-button">Void</button>
-            <button>Hold</button>
+            <button className="danger-button" onClick={clearCurrentCart}>
+              Clear Cart
+            </button>
+            <button onClick={holdCurrentOrder}>Hold</button>
             <button className="success-button" onClick={openPayment}>
               Payment
             </button>
@@ -1105,6 +1255,9 @@ export function PosPage() {
                 {label}
                 {tab === "receipts" && recentSales.length > 0 && (
                   <span>{recentSales.length}</span>
+                )}
+                {tab === "held" && heldOrders.length > 0 && (
+                  <span>{heldOrders.length}</span>
                 )}
               </button>
             ))}
@@ -1321,14 +1474,39 @@ export function PosPage() {
                 </button>
               </header>
 
+              <div className="sales-history-filters">
+                <label>
+                  Status
+                  <select
+                    value={historyStatus}
+                    onChange={(event) =>
+                      setHistoryStatus(event.target.value as SalesHistoryStatus)
+                    }
+                  >
+                    <option value="all">All recent</option>
+                    <option value="completed">Completed</option>
+                    <option value="pending_payment">Pending payment</option>
+                    <option value="cancelled">Cancelled</option>
+                  </select>
+                </label>
+                <label>
+                  Search
+                  <input
+                    value={historySearch}
+                    onChange={(event) => setHistorySearch(event.target.value)}
+                    placeholder="Invoice, status, item, amount"
+                  />
+                </label>
+              </div>
+
               <div className="sales-history-list">
-                {recentSales.length === 0 && (
+                {filteredRecentSales.length === 0 && (
                   <div className="sales-history-empty">
-                    No sales found yet. Completed sales will appear here.
+                    No sales match the current filters.
                   </div>
                 )}
 
-                {recentSales.map((sale) => (
+                {filteredRecentSales.map((sale) => (
                   <article className="sales-history-row" key={sale.id}>
                     <div>
                       <strong>{sale.invoice_number}</strong>
@@ -1352,6 +1530,16 @@ export function PosPage() {
                           Confirm M-Pesa
                         </button>
                       )}
+                      {sale.status === "pending_payment" &&
+                        Number(sale.paid_amount) === 0 && (
+                          <button
+                            type="button"
+                            disabled={historyBusy || paymentBusy}
+                            onClick={() => void cancelUnpaidSale(sale)}
+                          >
+                            Cancel Sale
+                          </button>
+                        )}
                       <button
                         disabled={sale.status !== "completed" || historyBusy}
                         onClick={() => void openReceiptViewer(sale.id)}
@@ -1368,13 +1556,45 @@ export function PosPage() {
 
         {activeWorkspaceTab === "held" && (
           <section className="pos-held-workspace">
-            <div className="pos-empty-state">
-              <strong>Held orders will live here</strong>
-              <span>
-                The visual space is ready. Next we can wire Hold/Resume once the
-                sale-hold workflow is added.
-              </span>
-            </div>
+            {heldOrders.length === 0 && (
+              <div className="pos-empty-state">
+                <strong>No held orders</strong>
+                <span>
+                  Use Hold on the cart when a customer pauses checkout, then resume
+                  from here.
+                </span>
+              </div>
+            )}
+
+            {heldOrders.length > 0 && (
+              <div className="held-orders-list">
+                {heldOrders.map((order) => (
+                  <article className="held-order-card" key={order.id}>
+                    <div>
+                      <p className="eyebrow">Held order</p>
+                      <strong>{order.label}</strong>
+                      <span>
+                        {order.cart.length} line(s) / {money(order.total)}
+                      </span>
+                      <span>{dateLabel(order.createdAt)}</span>
+                      {order.customerPhone && <span>{order.customerPhone}</span>}
+                    </div>
+                    <div className="held-order-actions">
+                      <button type="button" onClick={() => resumeHeldOrder(order)}>
+                        Resume
+                      </button>
+                      <button
+                        type="button"
+                        className="danger-button"
+                        onClick={() => discardHeldOrder(order.id)}
+                      >
+                        Discard
+                      </button>
+                    </div>
+                  </article>
+                ))}
+              </div>
+            )}
           </section>
         )}
       </section>
@@ -1620,6 +1840,16 @@ export function PosPage() {
                         )}
                       </article>
                     ))}
+                    {Number(pendingSale.paid_amount) === 0 && (
+                      <button
+                        type="button"
+                        className="danger-button cancel-sale-button"
+                        disabled={paymentBusy}
+                        onClick={() => void cancelUnpaidSale()}
+                      >
+                        Cancel Unpaid Sale
+                      </button>
+                    )}
                   </section>
                 )}
                 {paymentMethod === "split" && (

@@ -321,6 +321,13 @@ export function getPosSale(token: string, saleId: string) {
   return apiRequest<PosSale>(`/pos/sales/${saleId}`, { token });
 }
 
+export function cancelPosSale(token: string, saleId: string) {
+  return apiRequest<PosSale>(`/pos/sales/${saleId}/cancel`, {
+    token,
+    method: "POST",
+  });
+}
+
 export function addSalePayment(
   token: string,
   saleId: string,
@@ -396,10 +403,19 @@ export function getSaleReceipt(token: string, saleId: string) {
   return apiRequest<Receipt>(`/pos/sales/${saleId}/receipt`, { token });
 }
 
-export function listPosSales(token: string, branchId: string) {
+export function listPosSales(
+  token: string,
+  branchId: string,
+  options?: { status?: string; pageSize?: number },
+) {
   return apiRequest<Page<PosSale>>("/pos/sales", {
     token,
-    query: { branch_id: branchId, page: 1, page_size: 12 },
+    query: {
+      branch_id: branchId,
+      page: 1,
+      page_size: options?.pageSize ?? 12,
+      status: options?.status,
+    },
   });
 }
 

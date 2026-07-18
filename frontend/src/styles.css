@@ -2467,6 +2467,31 @@ button:disabled {
   background: var(--panel-soft);
 }
 
+.sales-history-filters {
+  display: grid;
+  grid-template-columns: minmax(160px, 0.45fr) minmax(0, 1fr);
+  gap: 8px;
+}
+
+.sales-history-filters label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.sales-history-filters select,
+.sales-history-filters input {
+  min-height: 34px;
+  padding: 6px 9px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  outline: none;
+}
+
 .sales-history-list {
   display: grid;
   gap: 6px;
@@ -2530,6 +2555,57 @@ button:disabled {
 
 .pos-held-workspace {
   padding: 12px;
+}
+
+.held-orders-list {
+  display: grid;
+  gap: 8px;
+}
+
+.held-order-card {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.held-order-card div:first-child {
+  display: grid;
+  gap: 3px;
+}
+
+.held-order-card p {
+  margin: 0;
+}
+
+.held-order-card span {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.held-order-actions {
+  display: flex;
+  gap: 6px;
+}
+
+.held-order-actions button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  font-weight: 700;
+}
+
+.held-order-actions .danger-button,
+.payment-attempts-panel .cancel-sale-button {
+  color: #fff;
+  border-color: transparent;
+  background: var(--danger);
 }
 
 .modal-backdrop {
