@@ -591,10 +591,17 @@ export function listInventoryBalances(
   token: string,
   branchId: string,
   query = "",
+  options?: { lowStockOnly?: boolean; pageSize?: number },
 ) {
   return apiRequest<Page<InventoryBalance>>("/inventory/balances", {
     token,
-    query: { branch_id: branchId, query: query || undefined, page: 1, page_size: 50 },
+    query: {
+      branch_id: branchId,
+      query: query || undefined,
+      low_stock_only: options?.lowStockOnly || undefined,
+      page: 1,
+      page_size: options?.pageSize ?? 75,
+    },
   });
 }
 
@@ -602,23 +609,33 @@ export function listSerializedUnits(
   token: string,
   branchId: string,
   query = "",
+  options?: { status?: string; pageSize?: number },
 ) {
   return apiRequest<Page<SerializedUnit>>("/inventory/serialized-units", {
     token,
     query: {
       branch_id: branchId,
       query: query || undefined,
-      status: "available",
+      status: options?.status,
       page: 1,
-      page_size: 100,
+      page_size: options?.pageSize ?? 100,
     },
   });
 }
 
-export function listStockMovements(token: string, branchId: string) {
+export function listStockMovements(
+  token: string,
+  branchId: string,
+  options?: { variantId?: string; pageSize?: number },
+) {
   return apiRequest<Page<StockMovement>>("/inventory/movements", {
     token,
-    query: { branch_id: branchId, page: 1, page_size: 12 },
+    query: {
+      branch_id: branchId,
+      variant_id: options?.variantId,
+      page: 1,
+      page_size: options?.pageSize ?? 30,
+    },
   });
 }
 

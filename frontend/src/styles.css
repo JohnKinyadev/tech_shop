@@ -1539,6 +1539,43 @@ button:disabled {
   align-items: stretch;
 }
 
+.inventory-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(240px, 1fr) repeat(3, minmax(150px, 0.45fr));
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.inventory-filter-bar label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inventory-filter-bar input,
+.inventory-filter-bar select {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfd;
+  color: var(--text);
+  outline: none;
+}
+
+.inventory-filter-bar input:focus,
+.inventory-filter-bar select:focus {
+  border-color: var(--blue);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(26, 117, 187, 0.12);
+}
+
 .inventory-focus-card__body {
   display: grid;
   gap: 13px;
@@ -3091,6 +3128,18 @@ button:disabled {
 }
 
 @media (max-width: 1280px) {
+  .inventory-filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .inventory-desk {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  }
+
+  .inventory-desk .panel-card:first-child {
+    grid-column: 1 / -1;
+  }
+
   .pos-terminal {
     grid-template-columns: minmax(440px, 480px) minmax(0, 1fr);
   }

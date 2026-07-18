@@ -68,6 +68,32 @@ const emptyCountItemForm = {
   notes: "",
 };
 
+type BalanceFilter = "all" | "low" | "out";
+type SerializedStatusFilter =
+  | "all"
+  | "available"
+  | "reserved"
+  | "in_transfer"
+  | "sold"
+  | "returned"
+  | "damaged"
+  | "quarantined";
+type MovementScope = "selected" | "all";
+
+const serializedStatusOptions: Array<{
+  value: SerializedStatusFilter;
+  label: string;
+}> = [
+  { value: "all", label: "All statuses" },
+  { value: "available", label: "Available" },
+  { value: "reserved", label: "Reserved" },
+  { value: "in_transfer", label: "In transfer" },
+  { value: "sold", label: "Sold" },
+  { value: "returned", label: "Returned" },
+  { value: "damaged", label: "Damaged" },
+  { value: "quarantined", label: "Quarantined" },
+];
+
 function updateTransferStatus(
   transfer: StockTransfer,
   status: string,
@@ -96,6 +122,10 @@ function updateCountStatus(count: StockCount, status: string): StockCount {
 export function InventoryPage() {
   const { token, isPreview, user } = useAuth();
   const [query, setQuery] = useState("");
+  const [balanceFilter, setBalanceFilter] = useState<BalanceFilter>("all");
+  const [serializedStatus, setSerializedStatus] =
+    useState<SerializedStatusFilter>("all");
+  const [movementScope, setMovementScope] = useState<MovementScope>("selected");
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
   const [selectedBranchId, setSelectedBranchId] = useState(
     user?.branch_id ?? demoBranches[0]?.id ?? "",
@@ -187,19 +217,31 @@ export function InventoryPage() {
     [balances],
   );
 
+  const visibleBalances = useMemo(() => {
+    return balances.filter((item) => {
+      if (balanceFilter === "low") {
+        return item.is_low_stock || item.available_quantity <= item.reorder_level;
+      }
+      if (balanceFilter === "out") return item.available_quantity <= 0;
+      return true;
+    });
+  }, [balanceFilter, balances]);
+
   const serializedForSelectedItem = useMemo(() => {
+    if (query.trim()) return serializedUnits.slice(0, 10);
     if (!selectedStockBalance) return serializedUnits.slice(0, 6);
     return serializedUnits
       .filter((unit) => unit.variant_id === selectedStockBalance.variant_id)
       .slice(0, 6);
-  }, [selectedStockBalance, serializedUnits]);
+  }, [query, selectedStockBalance, serializedUnits]);
 
   const selectedMovements = useMemo(() => {
+    if (movementScope === "all") return movements.slice(0, 12);
     if (!selectedStockBalance) return movements.slice(0, 8);
     return movements
       .filter((movement) => movement.variant_id === selectedStockBalance.variant_id)
       .slice(0, 8);
-  }, [movements, selectedStockBalance]);
+  }, [movementScope, movements, selectedStockBalance]);
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -231,9 +273,19 @@ export function InventoryPage() {
 
     let active = true;
     Promise.allSettled([
-      listInventoryBalances(token, selectedBranchId, query),
-      listSerializedUnits(token, selectedBranchId, query),
-      listStockMovements(token, selectedBranchId),
+      listInventoryBalances(token, selectedBranchId, query, {
+        lowStockOnly: balanceFilter === "low",
+        pageSize: 100,
+      }),
+      listSerializedUnits(token, selectedBranchId, query, {
+        status: serializedStatus === "all" ? undefined : serializedStatus,
+        pageSize: 200,
+      }),
+      listStockMovements(token, selectedBranchId, {
+        variantId:
+          movementScope === "selected" ? selectedStockBalance?.variant_id : undefined,
+        pageSize: 50,
+      }),
       listAdjustmentRequests(token, selectedBranchId),
       listStockTransfers(token, selectedBranchId),
       listStockCounts(token, selectedBranchId),
@@ -332,7 +384,16 @@ export function InventoryPage() {
     return () => {
       active = false;
     };
-  }, [isPreview, query, selectedBranchId, token]);
+  }, [
+    balanceFilter,
+    isPreview,
+    movementScope,
+    query,
+    selectedBranchId,
+    selectedStockBalance?.variant_id,
+    serializedStatus,
+    token,
+  ]);
 
   useEffect(() => {
     const destinationStillValid = destinationBranches.some(
@@ -854,6 +915,53 @@ export function InventoryPage() {
 
       {notice && <div className="notice notice--page">{notice}</div>}
 
+      <section className="inventory-filter-bar">
+        <label>
+          Search stock / IMEI
+          <input
+            value={query}
+            onChange={(event) => setQuery(event.target.value)}
+            placeholder="SKU, product, serial number, or IMEI"
+          />
+        </label>
+        <label>
+          Stock focus
+          <select
+            value={balanceFilter}
+            onChange={(event) => setBalanceFilter(event.target.value as BalanceFilter)}
+          >
+            <option value="all">All stock</option>
+            <option value="low">Low stock</option>
+            <option value="out">Out of stock</option>
+          </select>
+        </label>
+        <label>
+          Serialized status
+          <select
+            value={serializedStatus}
+            onChange={(event) =>
+              setSerializedStatus(event.target.value as SerializedStatusFilter)
+            }
+          >
+            {serializedStatusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Movement history
+          <select
+            value={movementScope}
+            onChange={(event) => setMovementScope(event.target.value as MovementScope)}
+          >
+            <option value="selected">Selected item</option>
+            <option value="all">All recent movement</option>
+          </select>
+        </label>
+      </section>
+
       <div className="stats-grid">
         <article className="metric-card">
           <span>Total on hand</span>
@@ -966,6 +1074,9 @@ export function InventoryPage() {
               <p className="eyebrow">Serialized stock</p>
               <h2>Trackable devices</h2>
             </div>
+            <StatusPill tone="neutral">
+              {integer(serializedForSelectedItem.length)} shown
+            </StatusPill>
           </header>
           <div className="serialized-unit-list">
             {serializedForSelectedItem.length ? (
@@ -987,7 +1098,7 @@ export function InventoryPage() {
               ))
             ) : (
               <p className="empty-panel-message">
-                No available serial or IMEI units match this stock item.
+                No serial or IMEI units match the selected stock item and filters.
               </p>
             )}
           </div>
@@ -1362,14 +1473,7 @@ export function InventoryPage() {
             <p className="eyebrow">Stock balances</p>
             <h2>Products in branch stock</h2>
           </div>
-          <label className="table-search">
-            <span>Search</span>
-            <input
-              value={query}
-              onChange={(event) => setQuery(event.target.value)}
-              placeholder="SKU or product"
-            />
-          </label>
+          <StatusPill tone="neutral">{integer(visibleBalances.length)} shown</StatusPill>
         </header>
         <table className="data-table">
           <thead>
@@ -1384,31 +1488,39 @@ export function InventoryPage() {
             </tr>
           </thead>
           <tbody>
-            {balances.map((item) => (
-              <tr
-                key={item.stock_balance_id}
-                className={
-                  adjustmentForm.stock_balance_id === item.stock_balance_id
-                    ? "is-selected"
-                    : ""
-                }
-                onClick={() => selectBalance(item)}
-              >
-                <td>{item.sku}</td>
-                <td>
-                  {item.product_name} / {item.variant_name}
-                </td>
-                <td>{integer(item.quantity_on_hand)}</td>
-                <td>{integer(item.reserved_quantity)}</td>
-                <td>{integer(item.available_quantity)}</td>
-                <td>{integer(item.reorder_level)}</td>
-                <td>
-                  <StatusPill tone={balanceHealthTone(item)}>
-                    {titleize(balanceHealth(item))}
-                  </StatusPill>
+            {visibleBalances.length ? (
+              visibleBalances.map((item) => (
+                <tr
+                  key={item.stock_balance_id}
+                  className={
+                    adjustmentForm.stock_balance_id === item.stock_balance_id
+                      ? "is-selected"
+                      : ""
+                  }
+                  onClick={() => selectBalance(item)}
+                >
+                  <td>{item.sku}</td>
+                  <td>
+                    {item.product_name} / {item.variant_name}
+                  </td>
+                  <td>{integer(item.quantity_on_hand)}</td>
+                  <td>{integer(item.reserved_quantity)}</td>
+                  <td>{integer(item.available_quantity)}</td>
+                  <td>{integer(item.reorder_level)}</td>
+                  <td>
+                    <StatusPill tone={balanceHealthTone(item)}>
+                      {titleize(balanceHealth(item))}
+                    </StatusPill>
+                  </td>
+                </tr>
+              ))
+            ) : (
+              <tr>
+                <td colSpan={7} className="empty-table-cell">
+                  No stock balances match the current filters.
                 </td>
               </tr>
-            ))}
+            )}
           </tbody>
         </table>
       </section>
@@ -1559,8 +1671,15 @@ export function InventoryPage() {
           <header className="panel-card__header">
             <div>
               <p className="eyebrow">Movements</p>
-              <h2>Recent stock movement</h2>
+              <h2>
+                {movementScope === "all"
+                  ? "All recent stock movement"
+                  : "Selected item movement"}
+              </h2>
             </div>
+            <StatusPill tone="neutral">
+              {integer(selectedMovements.length)} moves
+            </StatusPill>
           </header>
           <table className="data-table">
             <thead>
@@ -1593,7 +1712,9 @@ export function InventoryPage() {
               ) : (
                 <tr>
                   <td colSpan={5} className="empty-table-cell">
-                    No movement history for the selected stock item yet.
+                    {movementScope === "all"
+                      ? "No recent stock movement for this branch yet."
+                      : "No movement history for the selected stock item yet."}
                   </td>
                 </tr>
               )}
