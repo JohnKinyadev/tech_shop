@@ -1622,9 +1622,49 @@ button:disabled {
   align-items: stretch;
 }
 
+.settings-context-grid,
+.settings-admin-grid {
+  display: grid;
+  gap: 12px;
+}
+
+.settings-context-grid {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.settings-admin-grid {
+  grid-template-columns: minmax(0, 0.85fr) minmax(340px, 1fr);
+}
+
+.settings-context-grid article {
+  display: grid;
+  gap: 5px;
+  min-width: 0;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.settings-context-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.settings-context-grid strong {
+  min-width: 0;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .settings-branch-card,
 .settings-checklist,
-.settings-till-list {
+.settings-till-list,
+.settings-payment-readiness,
+.settings-receipt-preview {
   display: grid;
   gap: 9px;
   padding: 12px;
@@ -1632,7 +1672,8 @@ button:disabled {
 
 .settings-branch-card > div,
 .settings-checklist article,
-.settings-till-list button {
+.settings-till-list button,
+.settings-payment-readiness article {
   display: grid;
   gap: 5px;
   padding: 10px;
@@ -1644,14 +1685,66 @@ button:disabled {
 .settings-branch-card span,
 .settings-branch-card div span,
 .settings-checklist span,
-.settings-till-list span {
+.settings-till-list span,
+.settings-payment-readiness span,
+.settings-receipt-preview span,
+.settings-receipt-preview small {
   color: var(--muted);
   line-height: 1.45;
 }
 
-.settings-checklist article {
+.settings-checklist article,
+.settings-payment-readiness article {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
+}
+
+.settings-payment-readiness p {
+  margin: 0;
+  padding: 10px;
+  border: 1px solid #b9d8f0;
+  border-radius: var(--radius);
+  background: #f4f9fd;
+  color: var(--muted);
+  line-height: 1.5;
+}
+
+.settings-receipt-preview__paper {
+  display: grid;
+  gap: 8px;
+  width: min(100%, 430px);
+  justify-self: center;
+  padding: 16px;
+  border: 1px dashed #b8c5cf;
+  background: #fff;
+}
+
+.settings-receipt-preview__paper h3,
+.settings-receipt-preview__paper p {
+  margin: 0;
+  text-align: center;
+}
+
+.settings-receipt-preview__paper h3 {
+  font-size: 20px;
+}
+
+.settings-receipt-preview__paper > span {
+  text-align: center;
+}
+
+.settings-receipt-preview__paper div {
+  display: grid;
+  grid-template-columns: 80px minmax(0, 1fr);
+  gap: 8px;
+  padding: 7px 0;
+  border-top: 1px dashed var(--line);
+}
+
+.settings-receipt-preview__paper small {
+  padding-top: 8px;
+  border-top: 1px dashed var(--line);
+  text-align: center;
 }
 
 .settings-till-list {
@@ -3382,6 +3475,11 @@ button:disabled {
   .report-filter-bar,
   .report-context-strip,
   .report-attention-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .settings-context-grid,
+  .settings-admin-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

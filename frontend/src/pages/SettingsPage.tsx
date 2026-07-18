@@ -1,6 +1,7 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
+  API_BASE_URL,
   createBranch,
   createTill,
   listBranches,
@@ -57,6 +58,8 @@ const emptyTillForm = {
   is_active: true,
 };
 
+type ReadinessState = "done" | "review" | "missing";
+
 function branchToForm(branch?: Branch) {
   if (!branch) return emptyBranchForm;
   return {
@@ -83,11 +86,25 @@ function codeFromName(name: string, suffix = "") {
 }
 
 function setupChecklist(branch: Branch | undefined, tills: Till[]) {
+  const activeTills = tills.filter((till) => till.is_active);
   return [
     {
       label: "Branch name",
       done: Boolean(branch?.name),
       detail: branch?.name ?? "Missing branch name",
+    },
+    {
+      label: "Branch code",
+      done: Boolean(branch?.code),
+      detail: branch?.code ?? "Missing branch code",
+    },
+    {
+      label: "Branch active",
+      done: branch?.status === "active",
+      detail:
+        branch?.status === "active"
+          ? "Ready for staff operations"
+          : `Currently ${titleize(branch?.status)}`,
     },
     {
       label: "Receipt contact",
@@ -104,10 +121,29 @@ function setupChecklist(branch: Branch | undefined, tills: Till[]) {
     },
     {
       label: "Active POS till",
-      done: tills.some((till) => till.is_active),
-      detail: `${integer(tills.filter((till) => till.is_active).length)} active till(s)`,
+      done: activeTills.length > 0,
+      detail: `${integer(activeTills.length)} active till(s)`,
+    },
+    {
+      label: "Till codes",
+      done: activeTills.every((till) => Boolean(till.code)) && activeTills.length > 0,
+      detail:
+        activeTills.length > 0
+          ? activeTills.map((till) => till.code).join(", ")
+          : "Create at least one active till",
     },
   ];
+}
+
+function branchAddress(branch?: Branch) {
+  if (!branch) return "No branch selected";
+  return [branch.address, branch.city, branch.country].filter(Boolean).join(", ");
+}
+
+function readinessTone(state: ReadinessState): "success" | "info" | "warning" {
+  if (state === "done") return "success";
+  if (state === "review") return "info";
+  return "warning";
 }
 
 export function SettingsPage() {
@@ -159,6 +195,45 @@ export function SettingsPage() {
     }),
     [branches, tills],
   );
+
+  const activeBranchTills = branchTills.filter((till) => till.is_active);
+  const apiTarget = useMemo(() => {
+    try {
+      return new URL(API_BASE_URL).origin;
+    } catch {
+      return API_BASE_URL;
+    }
+  }, []);
+  const paymentReadiness: Array<{
+    label: string;
+    state: ReadinessState;
+    detail: string;
+  }> = [
+    {
+      label: "POS till coverage",
+      state: activeBranchTills.length ? "done" : "missing",
+      detail: activeBranchTills.length
+        ? `${integer(activeBranchTills.length)} active register(s) can open sessions`
+        : "Create and activate at least one till for this branch",
+    },
+    {
+      label: "Frontend API target",
+      state: API_BASE_URL.includes("/api/v1/staff") ? "done" : "review",
+      detail: apiTarget,
+    },
+    {
+      label: "M-Pesa server keys",
+      state: "review",
+      detail: "Confirm MPESA_CONSUMER_KEY, SECRET, PASSKEY, SHORTCODE in backend .env",
+    },
+    {
+      label: "M-Pesa callback URL",
+      state: "review",
+      detail: "Confirm MPESA_CALLBACK_BASE_URL points to your public backend/ngrok URL",
+    },
+  ];
+  const selectedBranchContact =
+    selectedBranch?.phone || selectedBranch?.email || "No contact set";
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -226,6 +301,16 @@ export function SettingsPage() {
       is_active: selectedTill.is_active,
     });
   }, [selectedTill]);
+
+  useEffect(() => {
+    if (!branchTills.length) {
+      setSelectedTillId("");
+      return;
+    }
+    if (!branchTills.some((till) => till.id === selectedTillId)) {
+      setSelectedTillId(branchTills[0].id);
+    }
+  }, [branchTills, selectedTillId]);
 
   function upsertBranch(branch: Branch) {
     setBranches((current) =>
@@ -470,6 +555,25 @@ export function SettingsPage() {
         </article>
       </div>
 
+      <section className="settings-context-grid">
+        <article>
+          <span>Admin context</span>
+          <strong>{user?.role_name ?? "Current user"}</strong>
+        </article>
+        <article>
+          <span>Branch scope</span>
+          <strong>{selectedBranch?.name ?? "No branch selected"}</strong>
+        </article>
+        <article>
+          <span>Receipt contact</span>
+          <strong>{selectedBranchContact}</strong>
+        </article>
+        <article>
+          <span>API target</span>
+          <strong>{apiTarget}</strong>
+        </article>
+      </section>
+
       <div className="settings-desk m-t">
         <section className="panel-card">
           <header className="panel-card__header panel-card__header--compact">
@@ -552,6 +656,74 @@ export function SettingsPage() {
             ) : (
               <p className="empty-panel-message">No tills configured.</p>
             )}
+          </div>
+        </section>
+      </div>
+
+      <div className="settings-admin-grid m-t">
+        <section className="panel-card">
+          <header className="panel-card__header">
+            <div>
+              <p className="eyebrow">Receipt preview</p>
+              <h2>What customers will see</h2>
+            </div>
+            <StatusPill tone={setupScore === 100 ? "success" : "warning"}>
+              {setupScore === 100 ? "Clean receipt" : "Needs profile data"}
+            </StatusPill>
+          </header>
+          <div className="settings-receipt-preview">
+            <div className="settings-receipt-preview__paper">
+              <h3>{selectedBranch?.name ?? "Branch name"}</h3>
+              <span>{selectedBranch?.code ?? "BRANCH-CODE"}</span>
+              <p>{branchAddress(selectedBranch) || "Receipt address not set"}</p>
+              <div>
+                <span>Phone</span>
+                <strong>{selectedBranch?.phone ?? "Not set"}</strong>
+              </div>
+              <div>
+                <span>Email</span>
+                <strong>{selectedBranch?.email ?? "Not set"}</strong>
+              </div>
+              <small>
+                Receipt details are pulled from the selected branch profile.
+              </small>
+            </div>
+          </div>
+        </section>
+
+        <section className="panel-card">
+          <header className="panel-card__header">
+            <div>
+              <p className="eyebrow">Payments</p>
+              <h2>Payment readiness</h2>
+            </div>
+            <StatusPill
+              tone={
+                paymentReadiness.every((item) => item.state === "done")
+                  ? "success"
+                  : "info"
+              }
+            >
+              Safe config view
+            </StatusPill>
+          </header>
+          <div className="settings-payment-readiness">
+            {paymentReadiness.map((item) => (
+              <article key={item.label}>
+                <StatusPill tone={readinessTone(item.state)}>
+                  {titleize(item.state)}
+                </StatusPill>
+                <div>
+                  <strong>{item.label}</strong>
+                  <span>{item.detail}</span>
+                </div>
+              </article>
+            ))}
+            <p>
+              Secret values are never displayed here. Use this panel as a
+              go-live checklist before testing M-Pesa prompts with a public
+              callback URL.
+            </p>
           </div>
         </section>
       </div>
