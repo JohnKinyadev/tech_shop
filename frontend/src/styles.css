@@ -1006,6 +1006,60 @@ button:disabled {
   border-top: 1px solid var(--line);
 }
 
+.purchase-filter-bar {
+  display: grid;
+  grid-template-columns: minmax(260px, 1fr) minmax(160px, 0.35fr) minmax(190px, 0.45fr) auto;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.purchase-filter-bar label {
+  display: grid;
+  gap: 5px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.purchase-filter-bar input,
+.purchase-filter-bar select {
+  min-height: 36px;
+  padding: 7px 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfd;
+  color: var(--text);
+  outline: none;
+}
+
+.purchase-filter-bar input:focus,
+.purchase-filter-bar select:focus {
+  border-color: var(--blue);
+  background: #fff;
+  box-shadow: 0 0 0 3px rgba(26, 117, 187, 0.12);
+}
+
+.purchase-filter-bar__result {
+  display: grid;
+  min-width: 130px;
+  align-content: center;
+  gap: 3px;
+  padding: 8px 11px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.purchase-filter-bar__result span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .purchase-line-builder,
 .purchase-draft-card__summary,
 .receipt-helper-card {
@@ -1048,6 +1102,63 @@ button:disabled {
   border-radius: 0;
 }
 
+.purchase-progress {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid #b9d8f0;
+  border-radius: var(--radius);
+  background: #f4f9fd;
+}
+
+.purchase-progress div:first-child {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.purchase-progress small {
+  color: var(--muted);
+}
+
+.purchase-progress__bar {
+  height: 9px;
+  overflow: hidden;
+  border-radius: 999px;
+  background: #d9e6f0;
+}
+
+.purchase-progress__bar span {
+  display: block;
+  height: 100%;
+  border-radius: inherit;
+  background: var(--blue);
+}
+
+.purchase-line-progress,
+.purchase-receipt-history {
+  display: grid;
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.purchase-line-progress__header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.purchase-line-progress__header span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
 .data-table--compact th,
 .data-table--compact td {
   padding: 8px 10px;
@@ -1077,17 +1188,23 @@ button:disabled {
 
 .receipt-tracking-card {
   display: grid;
-  grid-template-columns: minmax(0, 1.3fr) repeat(2, minmax(82px, 0.55fr));
+  grid-template-columns: minmax(0, 1.2fr) repeat(2, minmax(82px, 0.5fr)) auto;
   gap: 8px;
 }
 
-.receipt-tracking-card div {
+.receipt-tracking-card div,
+.receipt-fill-button {
   display: grid;
   gap: 4px;
   padding: 9px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
+}
+
+.receipt-fill-button {
+  min-height: auto;
+  align-content: center;
 }
 
 .receipt-tracking-card span {
@@ -1120,6 +1237,33 @@ button:disabled {
 
 .receipt-inline-notice {
   margin: 0;
+}
+
+.receipt-history-list {
+  display: grid;
+  gap: 8px;
+}
+
+.receipt-history-list article {
+  display: grid;
+  gap: 7px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.receipt-history-list article div:first-child,
+.receipt-history-list__items {
+  display: grid;
+  gap: 3px;
+}
+
+.receipt-history-list span,
+.receipt-history-list p {
+  margin: 0;
+  color: var(--muted);
+  line-height: 1.45;
 }
 
 .repair-desk {
@@ -3129,6 +3273,10 @@ button:disabled {
 
 @media (max-width: 1280px) {
   .inventory-filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .purchase-filter-bar {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

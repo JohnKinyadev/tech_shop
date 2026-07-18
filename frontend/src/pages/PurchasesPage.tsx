@@ -6,12 +6,19 @@ import {
   createSupplier,
   listBranches,
   listCatalogProducts,
+  listPurchaseOrderReceipts,
   listPurchaseOrders,
   listSuppliers,
   receivePurchaseOrder,
   submitPurchaseOrder,
 } from "../api/client";
-import type { Branch, CatalogProduct, PurchaseOrder, Supplier } from "../api/types";
+import type {
+  Branch,
+  CatalogProduct,
+  GoodsReceipt,
+  PurchaseOrder,
+  Supplier,
+} from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import {
   demoBranches,
@@ -39,6 +46,28 @@ type PurchaseDraftLine = {
   unitCost: number;
   taxRate: number;
 };
+
+type PurchaseStatusFilter =
+  | "all"
+  | "draft"
+  | "submitted"
+  | "approved"
+  | "partially_received"
+  | "received"
+  | "cancelled";
+
+const purchaseStatusOptions: Array<{
+  value: PurchaseStatusFilter;
+  label: string;
+}> = [
+  { value: "all", label: "All statuses" },
+  { value: "draft", label: "Draft" },
+  { value: "submitted", label: "Submitted" },
+  { value: "approved", label: "Approved" },
+  { value: "partially_received", label: "Partially received" },
+  { value: "received", label: "Received" },
+  { value: "cancelled", label: "Cancelled" },
+];
 
 const emptySupplierForm = {
   name: "",
@@ -106,6 +135,19 @@ function orderUnits(order: PurchaseOrder) {
   );
 }
 
+function orderProgress(order?: PurchaseOrder) {
+  if (!order) return { ordered: 0, received: 0, remaining: 0, percent: 0 };
+  const units = orderUnits(order);
+  const remaining = Math.max(0, units.ordered - units.received);
+  return {
+    ...units,
+    remaining,
+    percent: units.ordered
+      ? Math.min(100, Math.round((units.received / units.ordered) * 100))
+      : 0,
+  };
+}
+
 function lineTotal(quantity: number, unitCost: number, taxRate: number) {
   const subtotal = quantity * unitCost;
   return subtotal + subtotal * (taxRate / 100);
@@ -168,11 +210,16 @@ export function PurchasesPage() {
   const [selectedOrderId, setSelectedOrderId] = useState(
     demoPurchaseOrders[0]?.id ?? "",
   );
+  const [orderQuery, setOrderQuery] = useState("");
+  const [orderStatusFilter, setOrderStatusFilter] =
+    useState<PurchaseStatusFilter>("all");
+  const [supplierFilter, setSupplierFilter] = useState("");
   const [productSearch, setProductSearch] = useState("");
   const [supplierForm, setSupplierForm] = useState(emptySupplierForm);
   const [purchaseForm, setPurchaseForm] = useState(emptyPurchaseForm);
   const [purchaseLines, setPurchaseLines] = useState<PurchaseDraftLine[]>([]);
   const [receiptForm, setReceiptForm] = useState(emptyReceiptForm);
+  const [receiptHistory, setReceiptHistory] = useState<GoodsReceipt[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
 
@@ -215,9 +262,46 @@ export function PurchasesPage() {
   );
   const selectedPurchaseVariant = variantById.get(purchaseForm.variant_id);
 
+  const branchOrders = useMemo(
+    () =>
+      orders.filter((order) =>
+        selectedBranchId ? order.branch_id === selectedBranchId : true,
+      ),
+    [orders, selectedBranchId],
+  );
+
+  const visibleOrders = useMemo(() => {
+    const needle = orderQuery.trim().toLowerCase();
+    return branchOrders.filter((order) => {
+      const supplierName = supplierById.get(order.supplier_id) ?? "";
+      const matchesQuery =
+        !needle ||
+        [
+          order.order_number,
+          order.supplier_reference ?? "",
+          supplierName,
+          order.notes ?? "",
+        ]
+          .join(" ")
+          .toLowerCase()
+          .includes(needle);
+      const matchesStatus =
+        orderStatusFilter === "all" || order.status === orderStatusFilter;
+      const matchesSupplier =
+        !supplierFilter || order.supplier_id === supplierFilter;
+      return matchesQuery && matchesStatus && matchesSupplier;
+    });
+  }, [branchOrders, orderQuery, orderStatusFilter, supplierById, supplierFilter]);
+
   const selectedOrder = useMemo(
-    () => orders.find((order) => order.id === selectedOrderId) ?? orders[0],
-    [orders, selectedOrderId],
+    () =>
+      branchOrders.find((order) => order.id === selectedOrderId) ??
+      branchOrders[0],
+    [branchOrders, selectedOrderId],
+  );
+  const selectedOrderProgress = useMemo(
+    () => orderProgress(selectedOrder),
+    [selectedOrder],
   );
 
   const receivableItems = useMemo(
@@ -262,13 +346,17 @@ export function PurchasesPage() {
     0,
   );
 
-  const totalOrdered = orders.reduce(
+  const totalOrdered = branchOrders.reduce(
     (sum, order) => sum + Number(order.total_amount),
     0,
   );
-  const awaiting = orders.filter((order) =>
+  const awaiting = branchOrders.filter((order) =>
     ["submitted", "approved", "partially_received"].includes(order.status),
   ).length;
+  const receivedUnits = branchOrders.reduce(
+    (sum, order) => sum + orderUnits(order).received,
+    0,
+  );
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -276,7 +364,7 @@ export function PurchasesPage() {
     let active = true;
     Promise.allSettled([
       listBranches(token),
-      listPurchaseOrders(token),
+      listPurchaseOrders(token, { pageSize: 100 }),
       listSuppliers(token),
     ]).then(([branchesResult, ordersResult, suppliersResult]) => {
       if (!active) return;
@@ -324,6 +412,20 @@ export function PurchasesPage() {
   }, [isPreview, token, user?.branch_id]);
 
   useEffect(() => {
+    if (!branchOrders.length) {
+      setSelectedOrderId("");
+      return;
+    }
+
+    const selectedOrderStillInBranch = branchOrders.some(
+      (order) => order.id === selectedOrderId,
+    );
+    if (!selectedOrderStillInBranch) {
+      setSelectedOrderId(branchOrders[0].id);
+    }
+  }, [branchOrders, selectedOrderId]);
+
+  useEffect(() => {
     if (!token || isPreview) return;
 
     let active = true;
@@ -342,6 +444,33 @@ export function PurchasesPage() {
       active = false;
     };
   }, [isPreview, productSearch, token]);
+
+  useEffect(() => {
+    if (!selectedOrder) {
+      setReceiptHistory([]);
+      return;
+    }
+
+    if (!token || isPreview) {
+      setReceiptHistory([]);
+      return;
+    }
+
+    let active = true;
+    listPurchaseOrderReceipts(token, selectedOrder.id)
+      .then((receipts) => {
+        if (!active) return;
+        setReceiptHistory(receipts);
+      })
+      .catch(() => {
+        if (!active) return;
+        setReceiptHistory([]);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isPreview, selectedOrder, token]);
 
   useEffect(() => {
     if (!variantOptions.length) return;
@@ -400,7 +529,7 @@ export function PurchasesPage() {
 
   async function refreshPurchaseOrders(preferredOrderId?: string) {
     if (!token || isPreview) return;
-    const result = await listPurchaseOrders(token);
+    const result = await listPurchaseOrders(token, { pageSize: 100 });
     setOrders(result.items);
     setSelectedOrderId(
       preferredOrderId || selectedOrderId || result.items[0]?.id || "",
@@ -706,6 +835,29 @@ export function PurchasesPage() {
     setBusy(true);
     try {
       if (!token || isPreview) {
+        const now = new Date().toISOString();
+        const receiptId = `preview-receipt-${Date.now()}`;
+        const receipt: GoodsReceipt = {
+          id: receiptId,
+          created_at: now,
+          updated_at: now,
+          is_deleted: false,
+          purchase_order_id: selectedOrder.id,
+          receipt_number: `GRN-PREVIEW-${receiptHistory.length + 1}`,
+          received_by_id: user?.id ?? "preview-user",
+          received_at: now,
+          supplier_delivery_note: receiptForm.supplier_delivery_note || null,
+          notes: receiptForm.notes || null,
+          items: [
+            {
+              id: `preview-receipt-item-${Date.now()}`,
+              receipt_id: receiptId,
+              purchase_order_item_id: selectedItem.id,
+              quantity,
+              unit_cost: selectedItem.unit_cost,
+            },
+          ],
+        };
         setOrders((current) =>
           current.map((order) => {
             if (order.id !== selectedOrder.id) return order;
@@ -722,16 +874,17 @@ export function PurchasesPage() {
               ...order,
               items,
               status: fullyReceived ? "received" : "partially_received",
-              updated_at: new Date().toISOString(),
+              updated_at: now,
             };
           }),
         );
+        setReceiptHistory((current) => [receipt, ...current]);
         setReceiptForm(emptyReceiptForm);
         setNotice("Preview receipt posted locally and stock receipt progress updated.");
         return;
       }
 
-      await receivePurchaseOrder(token, selectedOrder.id, {
+      const receipt = await receivePurchaseOrder(token, selectedOrder.id, {
         supplier_delivery_note: receiptForm.supplier_delivery_note || null,
         notes: receiptForm.notes || null,
         items: [
@@ -743,6 +896,7 @@ export function PurchasesPage() {
           },
         ],
       });
+      setReceiptHistory((current) => [receipt, ...current]);
       await refreshPurchaseOrders(selectedOrder.id);
       setReceiptForm(emptyReceiptForm);
       setNotice(`Received ${quantity} unit(s) against ${selectedOrder.order_number}.`);
@@ -781,10 +935,54 @@ export function PurchasesPage() {
 
       {notice && <div className="notice notice--page">{notice}</div>}
 
-      <div className="stats-grid stats-grid--three">
+      <section className="purchase-filter-bar">
+        <label>
+          Find purchase order
+          <input
+            value={orderQuery}
+            onChange={(event) => setOrderQuery(event.target.value)}
+            placeholder="PO number, supplier ref, supplier, or notes"
+          />
+        </label>
+        <label>
+          Status
+          <select
+            value={orderStatusFilter}
+            onChange={(event) =>
+              setOrderStatusFilter(event.target.value as PurchaseStatusFilter)
+            }
+          >
+            {purchaseStatusOptions.map((option) => (
+              <option key={option.value} value={option.value}>
+                {option.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
+          Supplier
+          <select
+            value={supplierFilter}
+            onChange={(event) => setSupplierFilter(event.target.value)}
+          >
+            <option value="">All suppliers</option>
+            {suppliers.map((supplier) => (
+              <option key={supplier.id} value={supplier.id}>
+                {supplier.name}
+              </option>
+            ))}
+          </select>
+        </label>
+        <div className="purchase-filter-bar__result">
+          <span>Showing</span>
+          <strong>{integer(visibleOrders.length)} order(s)</strong>
+        </div>
+      </section>
+
+      <div className="stats-grid">
         <article className="metric-card">
           <span>Purchase orders</span>
-          <strong>{integer(orders.length)}</strong>
+          <strong>{integer(branchOrders.length)}</strong>
           <StatusPill tone="info">Total</StatusPill>
         </article>
         <article className="metric-card">
@@ -796,6 +994,11 @@ export function PurchasesPage() {
           <span>Ordered value</span>
           <strong>{money(totalOrdered)}</strong>
           <StatusPill tone="neutral">Cost</StatusPill>
+        </article>
+        <article className="metric-card">
+          <span>Received units</span>
+          <strong>{integer(receivedUnits)}</strong>
+          <StatusPill tone="success">Stocked</StatusPill>
         </article>
       </div>
 
@@ -1139,6 +1342,24 @@ export function PurchasesPage() {
                   <StatusPill tone={toneForStatus(selectedOrder.status)}>
                     {titleize(selectedOrder.status)}
                   </StatusPill>
+                  <div className="purchase-progress">
+                    <div>
+                      <span>Receiving progress</span>
+                      <strong>
+                        {integer(selectedOrderProgress.received)} /{" "}
+                        {integer(selectedOrderProgress.ordered)} units
+                      </strong>
+                    </div>
+                    <div className="purchase-progress__bar">
+                      <span
+                        style={{ width: `${selectedOrderProgress.percent}%` }}
+                      />
+                    </div>
+                    <small>
+                      {integer(selectedOrderProgress.remaining)} unit(s) still
+                      awaiting delivery.
+                    </small>
+                  </div>
                 </div>
 
                 <div className="action-form">
@@ -1161,6 +1382,50 @@ export function PurchasesPage() {
                       Approve
                     </button>
                   </div>
+                </div>
+
+                <div className="purchase-line-progress">
+                  <div className="purchase-line-progress__header">
+                    <strong>Line receiving progress</strong>
+                    <span>
+                      {integer(receivableItems.length)} line(s) still open
+                    </span>
+                  </div>
+                  <table className="data-table data-table--compact">
+                    <thead>
+                      <tr>
+                        <th>Item</th>
+                        <th>Ordered</th>
+                        <th>Received</th>
+                        <th>Remaining</th>
+                      </tr>
+                    </thead>
+                    <tbody>
+                      {selectedOrder.items.map((item) => {
+                        const remaining = Math.max(
+                          0,
+                          item.ordered_quantity - item.received_quantity,
+                        );
+                        return (
+                          <tr key={item.id}>
+                            <td>
+                              <strong>{variantLabel(item.variant_id)}</strong>
+                              <span>{money(item.unit_cost)} unit cost</span>
+                            </td>
+                            <td>{integer(item.ordered_quantity)}</td>
+                            <td>{integer(item.received_quantity)}</td>
+                            <td>
+                              <StatusPill
+                                tone={remaining ? "warning" : "success"}
+                              >
+                                {remaining ? `${integer(remaining)} left` : "Done"}
+                              </StatusPill>
+                            </td>
+                          </tr>
+                        );
+                      })}
+                    </tbody>
+                  </table>
                 </div>
 
                 <form onSubmit={handleReceiveStock} className="action-form">
@@ -1215,6 +1480,21 @@ export function PurchasesPage() {
                           )}
                         </strong>
                       </div>
+                      <button
+                        className="secondary-button receipt-fill-button"
+                        type="button"
+                        onClick={() =>
+                          setReceiptForm((current) => ({
+                            ...current,
+                            quantity: String(
+                              selectedReceiptItem.ordered_quantity -
+                                selectedReceiptItem.received_quantity,
+                            ),
+                          }))
+                        }
+                      >
+                        Fill Remaining
+                      </button>
                     </div>
                   )}
 
@@ -1365,12 +1645,55 @@ export function PurchasesPage() {
                     disabled={
                       busy ||
                       Boolean(receiptIssue) ||
+                      !selectedReceiptItem ||
                       !["approved", "partially_received"].includes(selectedOrder.status)
                     }
                   >
                     Receive Stock
                   </button>
                 </form>
+
+                <div className="purchase-receipt-history">
+                  <div className="purchase-line-progress__header">
+                    <strong>Receipt history</strong>
+                    <span>{integer(receiptHistory.length)} receipt(s)</span>
+                  </div>
+                  {receiptHistory.length ? (
+                    <div className="receipt-history-list">
+                      {receiptHistory.map((receipt) => (
+                        <article key={receipt.id}>
+                          <div>
+                            <strong>{receipt.receipt_number}</strong>
+                            <span>
+                              {dateLabel(receipt.received_at)} · Delivery note{" "}
+                              {receipt.supplier_delivery_note || "-"}
+                            </span>
+                          </div>
+                          <div className="receipt-history-list__items">
+                            {receipt.items.map((item) => {
+                              const orderItem = selectedOrder.items.find(
+                                (line) => line.id === item.purchase_order_item_id,
+                              );
+                              return (
+                                <span key={item.id}>
+                                  {orderItem
+                                    ? variantLabel(orderItem.variant_id)
+                                    : item.purchase_order_item_id}{" "}
+                                  · {integer(item.quantity)} unit(s)
+                                </span>
+                              );
+                            })}
+                          </div>
+                          {receipt.notes && <p>{receipt.notes}</p>}
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="empty-panel-message">
+                      No receipts recorded for this purchase order yet.
+                    </p>
+                  )}
+                </div>
               </>
             ) : (
               <p className="muted">Select a purchase order from the table.</p>
@@ -1386,6 +1709,9 @@ export function PurchasesPage() {
               <p className="eyebrow">Purchase orders</p>
               <h2>Orders</h2>
             </div>
+            <StatusPill tone="neutral">
+              {integer(visibleOrders.length)} shown
+            </StatusPill>
           </header>
           <table className="data-table">
             <thead>
@@ -1397,9 +1723,10 @@ export function PurchasesPage() {
                 <th>Expected</th>
                 <th>Total</th>
               </tr>
-            </thead>
-            <tbody>
-              {orders.map((order) => {
+          </thead>
+          <tbody>
+              {visibleOrders.length ? (
+                visibleOrders.map((order) => {
                 const units = orderUnits(order);
                 return (
                   <tr
@@ -1421,7 +1748,14 @@ export function PurchasesPage() {
                     <td>{money(order.total_amount)}</td>
                   </tr>
                 );
-              })}
+                })
+              ) : (
+                <tr>
+                  <td colSpan={6} className="empty-table-cell">
+                    No purchase orders match the current filters.
+                  </td>
+                </tr>
+              )}
             </tbody>
           </table>
         </section>

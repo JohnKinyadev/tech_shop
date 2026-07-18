@@ -806,10 +806,18 @@ export function updateRepairStatus(
   });
 }
 
-export function listPurchaseOrders(token: string) {
+export function listPurchaseOrders(
+  token: string,
+  options?: { status?: string; supplierId?: string; pageSize?: number },
+) {
   return apiRequest<Page<PurchaseOrder>>("/purchases", {
     token,
-    query: { page: 1, page_size: 50 },
+    query: {
+      status: options?.status,
+      supplier_id: options?.supplierId,
+      page: 1,
+      page_size: options?.pageSize ?? 75,
+    },
   });
 }
 
@@ -860,6 +868,10 @@ export function receivePurchaseOrder(
     method: "POST",
     body,
   });
+}
+
+export function listPurchaseOrderReceipts(token: string, orderId: string) {
+  return apiRequest<GoodsReceipt[]>(`/purchases/${orderId}/receipts`, { token });
 }
 
 export function listStaffUsers(token: string) {
