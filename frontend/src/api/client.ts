@@ -44,11 +44,19 @@ import type {
   ProductVariant,
   ProductVariantCreatePayload,
   ProductVariantUpdatePayload,
+  RepairCollection,
+  RepairDiagnosisPayload,
   PurchaseOrder,
   Receipt,
   PurchaseOrderCreatePayload,
   RepairAssignmentPayload,
   RepairBookingPayload,
+  RepairIntakePayload,
+  RepairInvoice,
+  RepairNotePayload,
+  RepairPartPayload,
+  RepairPaymentPayload,
+  RepairQuoteDecisionPayload,
   RepairStatusPayload,
   Role,
   RoleCreatePayload,
@@ -767,10 +775,20 @@ export function cancelStockCount(token: string, countId: string) {
   });
 }
 
-export function listRepairs(token: string, branchId: string) {
+export function listRepairs(
+  token: string,
+  branchId: string,
+  options?: { status?: string; technicianId?: string; pageSize?: number },
+) {
   return apiRequest<Page<RepairTicket>>("/repairs", {
     token,
-    query: { branch_id: branchId, page: 1, page_size: 50 },
+    query: {
+      branch_id: branchId,
+      status: options?.status,
+      technician_id: options?.technicianId,
+      page: 1,
+      page_size: options?.pageSize ?? 75,
+    },
   });
 }
 
@@ -794,6 +812,42 @@ export function assignRepairTechnician(
   });
 }
 
+export function recordRepairIntake(
+  token: string,
+  ticketId: string,
+  body: RepairIntakePayload,
+) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/intake`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function submitRepairDiagnosis(
+  token: string,
+  ticketId: string,
+  body: RepairDiagnosisPayload,
+) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/diagnosis`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function decideRepairQuote(
+  token: string,
+  ticketId: string,
+  body: RepairQuoteDecisionPayload,
+) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/quote-decision`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
 export function updateRepairStatus(
   token: string,
   ticketId: string,
@@ -803,6 +857,72 @@ export function updateRepairStatus(
     token,
     method: "POST",
     body,
+  });
+}
+
+export function addRepairPart(
+  token: string,
+  ticketId: string,
+  body: RepairPartPayload,
+) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/parts`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function removeRepairPart(token: string, ticketId: string, partId: string) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/parts/${partId}`, {
+    token,
+    method: "DELETE",
+  });
+}
+
+export function markRepairReady(
+  token: string,
+  ticketId: string,
+  body: RepairNotePayload,
+) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/ready`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function cancelRepair(
+  token: string,
+  ticketId: string,
+  body: RepairNotePayload,
+) {
+  return apiRequest<RepairTicket>(`/repairs/${ticketId}/cancel`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function getRepairInvoice(token: string, ticketId: string) {
+  return apiRequest<RepairInvoice>(`/repairs/${ticketId}/invoice`, { token });
+}
+
+export function addRepairPayment(
+  token: string,
+  ticketId: string,
+  body: RepairPaymentPayload,
+) {
+  return apiRequest<Payment>(`/repairs/${ticketId}/payments`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function collectRepair(token: string, ticketId: string) {
+  return apiRequest<RepairCollection>(`/repairs/${ticketId}/collect`, {
+    token,
+    method: "POST",
   });
 }
 

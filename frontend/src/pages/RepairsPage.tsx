@@ -1,24 +1,41 @@
 import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
+  addRepairPart,
+  addRepairPayment,
   assignRepairTechnician,
+  cancelRepair,
+  collectRepair,
   createCustomer,
   createRepairBooking,
+  currentTillSession,
+  decideRepairQuote,
+  getRepairInvoice,
   listAssignableRoles,
   listBranches,
+  listCatalogProducts,
   listCustomers,
   listRepairs,
+  listSerializedUnits,
   listStaffUsers,
+  markRepairReady,
+  recordRepairIntake,
   repairSummary,
+  removeRepairPart,
+  submitRepairDiagnosis,
   updateRepairStatus,
 } from "../api/client";
 import type {
   AssignableRole,
   Branch,
+  CatalogProduct,
   Customer,
+  RepairInvoice,
   RepairSummary,
   RepairTicket,
+  SerializedUnit,
   StaffUser,
+  TillSession,
 } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -29,6 +46,7 @@ import {
   demoRoles,
   demoStaffUsers,
 } from "../data/demoManagement";
+import { mockProducts } from "../data/mockProducts";
 import { useAuth } from "../state/auth";
 import { dateLabel, integer, money, titleize, toneForStatus } from "../utils/format";
 
@@ -62,6 +80,8 @@ const emptyTicketForm = {
   serial_number: "",
   imei: "",
   reported_issue: "",
+  intake_condition: "",
+  accessories_received: "",
 };
 
 const emptyCustomerForm = {
@@ -69,6 +89,56 @@ const emptyCustomerForm = {
   phone: "",
   email: "",
 };
+
+type VariantOption = {
+  id: string;
+  label: string;
+  sku: string;
+  trackingType: "bulk" | "serial" | "imei";
+  price: number;
+};
+
+const emptyDiagnosisForm = {
+  diagnosis: "",
+  labor_estimate: "",
+  parts_estimate: "",
+};
+
+const emptyPartForm = {
+  variant_id: "",
+  serialized_unit_id: "",
+  quantity: "1",
+};
+
+const emptyPaymentForm = {
+  method: "cash" as "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit",
+  amount: "",
+  provider_reference: "",
+  notes: "",
+};
+
+function splitList(value: string) {
+  return value
+    .split(/[\n,]+/)
+    .map((item) => item.trim())
+    .filter(Boolean);
+}
+
+function catalogToVariantOptions(products: CatalogProduct[]): VariantOption[] {
+  return products.flatMap((product) =>
+    product.variants.map((variant) => ({
+      id: variant.id,
+      label: `${product.name} / ${variant.name}`,
+      sku: variant.sku,
+      trackingType: variant.tracking_type,
+      price: Number(variant.selling_price),
+    })),
+  );
+}
+
+function repairParts(ticket?: RepairTicket) {
+  return ticket?.parts ?? [];
+}
 
 export function RepairsPage() {
   const { token, isPreview, user } = useAuth();
@@ -78,6 +148,10 @@ export function RepairsPage() {
   const [roles, setRoles] = useState<AssignableRole[]>(demoRoles);
   const [tickets, setTickets] = useState<RepairTicket[]>(demoRepairs);
   const [summary, setSummary] = useState<RepairSummary>(demoDashboard.repairs);
+  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const [serializedUnits, setSerializedUnits] = useState<SerializedUnit[]>([]);
+  const [tillSession, setTillSession] = useState<TillSession | null>(null);
+  const [invoice, setInvoice] = useState<RepairInvoice | null>(null);
   const [selectedBranchId, setSelectedBranchId] = useState(
     user?.branch_id ?? demoBranches[0]?.id ?? "",
   );
@@ -87,6 +161,12 @@ export function RepairsPage() {
   const [selectedTechnicianId, setSelectedTechnicianId] = useState("");
   const [nextStatus, setNextStatus] = useState("diagnosing");
   const [statusNote, setStatusNote] = useState("");
+  const [diagnosisForm, setDiagnosisForm] = useState(emptyDiagnosisForm);
+  const [quoteNote, setQuoteNote] = useState("");
+  const [partSearch, setPartSearch] = useState("");
+  const [partForm, setPartForm] = useState(emptyPartForm);
+  const [readyNote, setReadyNote] = useState("");
+  const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [ticketSearch, setTicketSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [notice, setNotice] = useState<string | null>(null);
@@ -109,6 +189,68 @@ export function RepairsPage() {
     () => tickets.find((ticket) => ticket.id === selectedTicketId) ?? tickets[0],
     [selectedTicketId, tickets],
   );
+
+  const partVariantOptions = useMemo(() => {
+    const variants =
+      !token || isPreview
+        ? mockProducts.map((product) => ({
+            id: product.variantId,
+            label: `${product.name} / ${product.variantName}`,
+            sku: product.sku,
+            trackingType: product.trackingType,
+            price: product.price,
+          }))
+        : catalogToVariantOptions(catalogProducts);
+    const needle = partSearch.trim().toLowerCase();
+    return variants.filter((variant) =>
+      needle
+        ? [variant.label, variant.sku, variant.trackingType]
+            .join(" ")
+            .toLowerCase()
+            .includes(needle)
+        : true,
+    );
+  }, [catalogProducts, isPreview, partSearch, token]);
+
+  const selectedPartVariant = useMemo(
+    () => partVariantOptions.find((variant) => variant.id === partForm.variant_id),
+    [partForm.variant_id, partVariantOptions],
+  );
+
+  const serializedPartOptions = useMemo(
+    () =>
+      serializedUnits.filter(
+        (unit) =>
+          unit.variant_id === partForm.variant_id && unit.status === "available",
+      ),
+    [partForm.variant_id, serializedUnits],
+  );
+
+  const selectedTicketParts = useMemo(
+    () => repairParts(selectedTicket),
+    [selectedTicket],
+  );
+
+  const derivedInvoice = useMemo(() => {
+    if (!selectedTicket) return null;
+    if (!invoiceEligible(selectedTicket.status)) return null;
+    const labor = Number(selectedTicket.labor_estimate);
+    const parts = selectedTicketParts.reduce(
+      (sum, part) => sum + Number(part.unit_price) * part.quantity,
+      0,
+    );
+    const estimateParts = Number(selectedTicket.parts_estimate);
+    const partsAmount = parts || estimateParts;
+    const total = labor + partsAmount;
+    return {
+      labor,
+      parts: partsAmount,
+      total,
+      paid: invoice ? Number(invoice.paid_amount) : 0,
+      due: invoice ? Number(invoice.balance_due) : total,
+      status: invoice?.payment_status ?? (total > 0 ? "unpaid" : "not_ready"),
+    };
+  }, [invoice, selectedTicket, selectedTicketParts]);
 
   const visibleTickets = useMemo(() => {
     const needle = ticketSearch.trim().toLowerCase();
@@ -236,17 +378,99 @@ export function RepairsPage() {
     };
   }, [isPreview, selectedBranchId, token]);
 
+  useEffect(() => {
+    if (!token || isPreview || !selectedBranchId) return;
+
+    let active = true;
+    Promise.allSettled([
+      listCatalogProducts(token, partSearch),
+      listSerializedUnits(token, selectedBranchId, "", {
+        status: "available",
+        pageSize: 100,
+      }),
+      currentTillSession(token),
+    ]).then(([catalogResult, serializedResult, tillResult]) => {
+      if (!active) return;
+
+      if (catalogResult.status === "fulfilled") {
+        setCatalogProducts(catalogResult.value.items);
+      }
+
+      if (serializedResult.status === "fulfilled") {
+        setSerializedUnits(serializedResult.value.items);
+      }
+
+      setTillSession(tillResult.status === "fulfilled" ? tillResult.value : null);
+    });
+
+    return () => {
+      active = false;
+    };
+  }, [isPreview, partSearch, selectedBranchId, token]);
+
   const statusCounts = useMemo(() => {
     const counts = new Map<string, number>();
-    summary.status_breakdown.forEach((item) => counts.set(item.status, item.ticket_count));
+    tickets.forEach((ticket) => {
+      counts.set(ticket.status, (counts.get(ticket.status) ?? 0) + 1);
+    });
     return counts;
-  }, [summary]);
+  }, [tickets]);
 
   useEffect(() => {
     if (!selectedTicket) return;
     setSelectedTechnicianId(selectedTicket.technician_id ?? "");
     setNextStatus(recommendedNextStatus(selectedTicket.status));
+    setDiagnosisForm({
+      diagnosis: selectedTicket.diagnosis ?? "",
+      labor_estimate:
+        Number(selectedTicket.labor_estimate) > 0
+          ? selectedTicket.labor_estimate
+          : "",
+      parts_estimate:
+        Number(selectedTicket.parts_estimate) > 0 ? selectedTicket.parts_estimate : "",
+    });
+    setQuoteNote("");
+    setReadyNote("");
+    setPartForm(emptyPartForm);
+    setInvoice(null);
   }, [selectedTicket?.id, selectedTicket?.status, selectedTicket?.technician_id]);
+
+  useEffect(() => {
+    if (!selectedTicket || !token || isPreview) return;
+    if (!invoiceEligible(selectedTicket.status)) return;
+
+    let active = true;
+    getRepairInvoice(token, selectedTicket.id)
+      .then((result) => {
+        if (!active) return;
+        setInvoice(result);
+        setPaymentForm((current) => ({
+          ...current,
+          amount:
+            current.amount || Number(result.balance_due) <= 0
+              ? current.amount
+              : result.balance_due,
+        }));
+      })
+      .catch(() => {
+        if (!active) return;
+        setInvoice(null);
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [isPreview, selectedTicket?.id, selectedTicket?.status, token]);
+
+  useEffect(() => {
+    if (!partVariantOptions.length) return;
+    setPartForm((current) => {
+      if (current.variant_id && partVariantOptions.some((item) => item.id === current.variant_id)) {
+        return current;
+      }
+      return { ...current, variant_id: partVariantOptions[0].id, serialized_unit_id: "" };
+    });
+  }, [partVariantOptions]);
 
   function customerLabel(customerId: string) {
     const customer = customers.find((item) => item.id === customerId);
@@ -263,8 +487,49 @@ export function RepairsPage() {
     return technician ? technician.full_name : technicianId;
   }
 
+  function repairPartLabel(variantId: string) {
+    const variant = partVariantOptions.find((item) => item.id === variantId);
+    return variant ? `${variant.label} / ${variant.sku}` : variantId;
+  }
+
   function ticketEstimate(ticket: RepairTicket) {
-    return Number(ticket.labor_estimate) + Number(ticket.parts_estimate);
+    const loggedParts = repairParts(ticket).reduce(
+      (sum, part) => sum + Number(part.unit_price) * part.quantity,
+      0,
+    );
+    return Number(ticket.labor_estimate) + (loggedParts || Number(ticket.parts_estimate));
+  }
+
+  function invoiceEligible(status: string) {
+    return [
+      "customer_approved",
+      "awaiting_parts",
+      "repairing",
+      "ready_for_pickup",
+      "collected",
+    ].includes(status);
+  }
+
+  function canLogParts(ticket: RepairTicket) {
+    return ["customer_approved", "awaiting_parts", "repairing"].includes(
+      ticket.status,
+    );
+  }
+
+  function canSubmitDiagnosis(ticket: RepairTicket) {
+    return Boolean(ticket.technician_id) && ["received", "diagnosing"].includes(ticket.status);
+  }
+
+  function canCollectSelectedTicket() {
+    return (
+      selectedTicket?.status === "ready_for_pickup" &&
+      derivedInvoice !== null &&
+      derivedInvoice.due <= 0
+    );
+  }
+
+  function paymentIdempotencyKey() {
+    return `repair-${selectedTicket?.id ?? "ticket"}-${Date.now()}`;
   }
 
   function ticketAgeLabel(ticket: RepairTicket) {
@@ -344,8 +609,13 @@ export function RepairsPage() {
       setNotice("Select a branch before creating a repair ticket.");
       return;
     }
-    if (!ticketForm.device_brand || !ticketForm.device_model || !ticketForm.reported_issue) {
-      setNotice("Device brand, model, and reported issue are required.");
+    if (
+      !ticketForm.device_brand ||
+      !ticketForm.device_model ||
+      !ticketForm.reported_issue ||
+      !ticketForm.intake_condition
+    ) {
+      setNotice("Device brand, model, issue, and intake condition are required.");
       return;
     }
     if (
@@ -404,12 +674,18 @@ export function RepairsPage() {
           imei: ticketForm.imei || null,
           reported_issue: ticketForm.reported_issue,
           diagnosis: null,
+          intake_condition: ticketForm.intake_condition,
+          intake_images: [],
+          accessories_received: splitList(ticketForm.accessories_received),
           labor_estimate: "0",
           parts_estimate: "0",
+          approved_at: null,
           booked_for: null,
           received_at: new Date().toISOString(),
           ready_at: null,
           collected_at: null,
+          parts: [],
+          status_history: [],
         };
         setTickets((current) => [ticket, ...current]);
         setSelectedTicketId(ticket.id);
@@ -435,7 +711,7 @@ export function RepairsPage() {
         customerId = customer.id;
       }
 
-      const ticket = await createRepairBooking(token, {
+      const booking = await createRepairBooking(token, {
         branch_id: selectedBranchId,
         customer_id: customerId,
         device_type: ticketForm.device_type,
@@ -444,6 +720,11 @@ export function RepairsPage() {
         serial_number: ticketForm.serial_number || null,
         imei: ticketForm.imei || null,
         reported_issue: ticketForm.reported_issue,
+      });
+      const ticket = await recordRepairIntake(token, booking.id, {
+        intake_condition: ticketForm.intake_condition,
+        accessories_received: splitList(ticketForm.accessories_received),
+        intake_images: [],
       });
       setTickets((current) => [ticket, ...current]);
       setSelectedTicketId(ticket.id);
@@ -511,6 +792,350 @@ export function RepairsPage() {
       setNotice(`Updated ${ticket.ticket_number} to ${titleize(ticket.status)}.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not update repair status.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleSubmitDiagnosis(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedTicket) {
+      setNotice("Select a repair ticket first.");
+      return;
+    }
+    if (!canSubmitDiagnosis(selectedTicket)) {
+      setNotice("Assign the ticket and keep it in received/diagnosing before diagnosis.");
+      return;
+    }
+    if (!diagnosisForm.diagnosis.trim()) {
+      setNotice("Diagnosis notes are required before preparing a quote.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        updateTicket({
+          ...selectedTicket,
+          diagnosis: diagnosisForm.diagnosis.trim(),
+          labor_estimate: String(Number(diagnosisForm.labor_estimate) || 0),
+          parts_estimate: String(Number(diagnosisForm.parts_estimate) || 0),
+          status: "quote_pending",
+          updated_at: new Date().toISOString(),
+        });
+        setNotice("Preview diagnosis submitted and quote prepared.");
+        return;
+      }
+
+      const ticket = await submitRepairDiagnosis(token, selectedTicket.id, {
+        diagnosis: diagnosisForm.diagnosis.trim(),
+        labor_estimate: Number(diagnosisForm.labor_estimate) || 0,
+        parts_estimate: Number(diagnosisForm.parts_estimate) || 0,
+      });
+      updateTicket(ticket);
+      setNotice(`Diagnosis submitted for ${ticket.ticket_number}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not submit diagnosis.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleQuoteDecision(approved: boolean) {
+    if (!selectedTicket) {
+      setNotice("Select a repair ticket first.");
+      return;
+    }
+    if (selectedTicket.status !== "quote_pending") {
+      setNotice("Quote approval is only available while the ticket is quote pending.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        updateTicket({
+          ...selectedTicket,
+          status: approved ? "customer_approved" : "cancelled",
+          approved_at: approved ? new Date().toISOString() : selectedTicket.approved_at,
+          updated_at: new Date().toISOString(),
+        });
+        setQuoteNote("");
+        setNotice(approved ? "Preview quote approved." : "Preview quote declined.");
+        return;
+      }
+
+      const ticket = await decideRepairQuote(token, selectedTicket.id, {
+        approved,
+        note: quoteNote || null,
+      });
+      updateTicket(ticket);
+      setQuoteNote("");
+      setNotice(
+        approved
+          ? `${ticket.ticket_number} quote approved.`
+          : `${ticket.ticket_number} quote declined and cancelled.`,
+      );
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not update quote decision.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleAddPart(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedTicket) {
+      setNotice("Select a repair ticket first.");
+      return;
+    }
+    if (!canLogParts(selectedTicket)) {
+      setNotice("Parts can only be logged after the customer approves the quote.");
+      return;
+    }
+    if (!selectedPartVariant) {
+      setNotice("Select a repair part from the catalog.");
+      return;
+    }
+    const quantity = Number(partForm.quantity);
+    if (!quantity || quantity <= 0) {
+      setNotice("Part quantity must be at least 1.");
+      return;
+    }
+    if (
+      selectedPartVariant.trackingType !== "bulk" &&
+      !partForm.serialized_unit_id
+    ) {
+      setNotice("Serialized/IMEI repair parts need a specific available unit.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        const part = {
+          id: `preview-repair-part-${Date.now()}`,
+          created_at: new Date().toISOString(),
+          updated_at: new Date().toISOString(),
+          is_deleted: false,
+          repair_ticket_id: selectedTicket.id,
+          variant_id: selectedPartVariant.id,
+          serialized_unit_id: partForm.serialized_unit_id || null,
+          quantity,
+          unit_price: String(selectedPartVariant.price),
+        };
+        updateTicket({
+          ...selectedTicket,
+          parts: [part, ...repairParts(selectedTicket)],
+          updated_at: new Date().toISOString(),
+        });
+        setPartForm((current) => ({
+          ...current,
+          serialized_unit_id: "",
+          quantity: "1",
+        }));
+        setNotice("Preview repair part logged locally.");
+        return;
+      }
+
+      const ticket = await addRepairPart(token, selectedTicket.id, {
+        variant_id: selectedPartVariant.id,
+        serialized_unit_id: partForm.serialized_unit_id || null,
+        quantity,
+      });
+      updateTicket(ticket);
+      setPartForm((current) => ({
+        ...current,
+        serialized_unit_id: "",
+        quantity: "1",
+      }));
+      setNotice(`Logged ${selectedPartVariant.label} on ${ticket.ticket_number}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not log repair part.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRemovePart(partId: string) {
+    if (!selectedTicket) return;
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        updateTicket({
+          ...selectedTicket,
+          parts: repairParts(selectedTicket).filter((part) => part.id !== partId),
+          updated_at: new Date().toISOString(),
+        });
+        setNotice("Preview repair part removed locally.");
+        return;
+      }
+
+      const ticket = await removeRepairPart(token, selectedTicket.id, partId);
+      updateTicket(ticket);
+      setNotice(`Removed part from ${ticket.ticket_number}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not remove repair part.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleMarkReady() {
+    if (!selectedTicket) {
+      setNotice("Select a repair ticket first.");
+      return;
+    }
+    if (selectedTicket.status !== "repairing") {
+      setNotice("Only repairs currently in progress can be marked ready.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        updateTicket(previewStatusUpdate(selectedTicket, "ready_for_pickup"));
+        setReadyNote("");
+        setNotice("Preview repair marked ready for pickup.");
+        return;
+      }
+
+      const ticket = await markRepairReady(token, selectedTicket.id, {
+        note: readyNote || null,
+      });
+      updateTicket(ticket);
+      setReadyNote("");
+      setNotice(`${ticket.ticket_number} is ready for pickup.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not mark repair ready.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCancelRepair() {
+    if (!selectedTicket) {
+      setNotice("Select a repair ticket first.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        updateTicket(previewStatusUpdate(selectedTicket, "cancelled"));
+        setNotice("Preview repair cancelled locally.");
+        return;
+      }
+      const ticket = await cancelRepair(token, selectedTicket.id, {
+        note: statusNote || "Repair cancelled from repair desk",
+      });
+      updateTicket(ticket);
+      setNotice(`${ticket.ticket_number} cancelled.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not cancel repair.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleRepairPayment(event: FormEvent) {
+    event.preventDefault();
+    if (!selectedTicket || !derivedInvoice) {
+      setNotice("Select an invoice-ready repair first.");
+      return;
+    }
+    const amount = Number(paymentForm.amount);
+    if (!amount || amount <= 0) {
+      setNotice("Payment amount must be greater than zero.");
+      return;
+    }
+    if (!tillSession && token && !isPreview) {
+      setNotice("Open a till session before receiving repair payments.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        const paid = derivedInvoice.paid + amount;
+        const total = derivedInvoice.total;
+        setInvoice({
+          ticket_id: selectedTicket.id,
+          ticket_number: selectedTicket.ticket_number,
+          branch_id: selectedTicket.branch_id,
+          customer_id: selectedTicket.customer_id,
+          customer_name: customerLabel(selectedTicket.customer_id).split(" / ")[0],
+          customer_phone: customerPhone(selectedTicket.customer_id),
+          device_description: `${selectedTicket.device_brand} ${selectedTicket.device_model}`,
+          labor_amount: String(derivedInvoice.labor),
+          parts_amount: String(derivedInvoice.parts),
+          total_amount: String(total),
+          paid_amount: String(paid),
+          balance_due: String(Math.max(0, total - paid)),
+          payment_status:
+            total - paid <= 0 ? "paid" : paid > 0 ? "partially_paid" : "unpaid",
+          payments: [
+            {
+              method: paymentForm.method,
+              amount: String(amount),
+              provider_reference: paymentForm.provider_reference || null,
+              paid_at: new Date().toISOString(),
+            },
+            ...(invoice?.payments ?? []),
+          ],
+        });
+        setPaymentForm(emptyPaymentForm);
+        setNotice("Preview repair payment recorded locally.");
+        return;
+      }
+
+      await addRepairPayment(token, selectedTicket.id, {
+        till_session_id: tillSession!.id,
+        method: paymentForm.method,
+        amount,
+        provider_reference: paymentForm.provider_reference || null,
+        idempotency_key: paymentIdempotencyKey(),
+        notes: paymentForm.notes || null,
+      });
+      const updatedInvoice = await getRepairInvoice(token, selectedTicket.id);
+      setInvoice(updatedInvoice);
+      setPaymentForm(emptyPaymentForm);
+      setNotice(`Payment recorded for ${selectedTicket.ticket_number}.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not record repair payment.");
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  async function handleCollectRepair() {
+    if (!selectedTicket) {
+      setNotice("Select a repair ticket first.");
+      return;
+    }
+    if (!canCollectSelectedTicket()) {
+      setNotice("Repair can only be collected once it is ready and fully paid.");
+      return;
+    }
+
+    setBusy(true);
+    try {
+      if (!token || isPreview) {
+        updateTicket(previewStatusUpdate(selectedTicket, "collected"));
+        setNotice("Preview repair collected locally.");
+        return;
+      }
+      const collection = await collectRepair(token, selectedTicket.id);
+      updateTicket({
+        ...selectedTicket,
+        status: collection.status,
+        collected_at: collection.collected_at,
+        updated_at: collection.collected_at,
+      });
+      setNotice(`${collection.ticket_number} collected.`);
+    } catch (error) {
+      setNotice(error instanceof Error ? error.message : "Could not collect repair.");
     } finally {
       setBusy(false);
     }
@@ -591,6 +1216,20 @@ export function RepairsPage() {
                 </span>
               </div>
               <p>{selectedTicket.reported_issue}</p>
+              {(selectedTicket.intake_condition ||
+                selectedTicket.accessories_received?.length) && (
+                <div className="repair-intake-summary">
+                  {selectedTicket.intake_condition && (
+                    <span>Condition: {selectedTicket.intake_condition}</span>
+                  )}
+                  {selectedTicket.accessories_received?.length ? (
+                    <span>
+                      Accessories:{" "}
+                      {selectedTicket.accessories_received.join(", ")}
+                    </span>
+                  ) : null}
+                </div>
+              )}
               {selectedTicket.diagnosis && (
                 <div className="repair-diagnosis-note">
                   <span>Diagnosis</span>
@@ -874,6 +1513,35 @@ export function RepairsPage() {
               />
             </label>
 
+            <div className="form-grid form-grid--two">
+              <label>
+                Intake condition
+                <textarea
+                  value={ticketForm.intake_condition}
+                  onChange={(event) =>
+                    setTicketForm((current) => ({
+                      ...current,
+                      intake_condition: event.target.value,
+                    }))
+                  }
+                  placeholder="Cracked screen, missing screws, powers on, liquid signs..."
+                />
+              </label>
+              <label>
+                Accessories received
+                <textarea
+                  value={ticketForm.accessories_received}
+                  onChange={(event) =>
+                    setTicketForm((current) => ({
+                      ...current,
+                      accessories_received: event.target.value,
+                    }))
+                  }
+                  placeholder="Charger, bag, SIM tray, case — comma or one per line"
+                />
+              </label>
+            </div>
+
             <div className="form-footer">
               <button className="primary-button" disabled={busy}>
                 Create Repair Ticket
@@ -932,6 +1600,103 @@ export function RepairsPage() {
                   </button>
                 </form>
 
+                <form onSubmit={handleSubmitDiagnosis} className="action-form">
+                  <div className="repair-form-hint">
+                    <span>Diagnosis & quote</span>
+                    <strong>
+                      {selectedTicket.diagnosis
+                        ? "Diagnosis captured"
+                        : "Awaiting technician diagnosis"}
+                    </strong>
+                  </div>
+                  <label>
+                    Diagnosis
+                    <textarea
+                      value={diagnosisForm.diagnosis}
+                      onChange={(event) =>
+                        setDiagnosisForm((current) => ({
+                          ...current,
+                          diagnosis: event.target.value,
+                        }))
+                      }
+                      placeholder="Fault found, recommended fix, customer-facing quote notes"
+                    />
+                  </label>
+                  <div className="form-grid form-grid--two">
+                    <label>
+                      Labor estimate
+                      <input
+                        type="number"
+                        min="0"
+                        value={diagnosisForm.labor_estimate}
+                        onChange={(event) =>
+                          setDiagnosisForm((current) => ({
+                            ...current,
+                            labor_estimate: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    <label>
+                      Parts estimate
+                      <input
+                        type="number"
+                        min="0"
+                        value={diagnosisForm.parts_estimate}
+                        onChange={(event) =>
+                          setDiagnosisForm((current) => ({
+                            ...current,
+                            parts_estimate: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <button
+                    className="secondary-button"
+                    disabled={busy || !canSubmitDiagnosis(selectedTicket)}
+                  >
+                    Submit Diagnosis
+                  </button>
+                </form>
+
+                <div className="action-form">
+                  <div className="repair-form-hint">
+                    <span>Customer quote decision</span>
+                    <strong>
+                      {selectedTicket.status === "quote_pending"
+                        ? "Waiting for customer"
+                        : titleize(selectedTicket.status)}
+                    </strong>
+                  </div>
+                  <label>
+                    Quote note
+                    <textarea
+                      value={quoteNote}
+                      onChange={(event) => setQuoteNote(event.target.value)}
+                      placeholder="Customer approved by phone, declined due to cost..."
+                    />
+                  </label>
+                  <div className="table-actions">
+                    <button
+                      className="secondary-button"
+                      disabled={busy || selectedTicket.status !== "quote_pending"}
+                      onClick={() => void handleQuoteDecision(true)}
+                      type="button"
+                    >
+                      Approve Quote
+                    </button>
+                    <button
+                      className="ghost-button"
+                      disabled={busy || selectedTicket.status !== "quote_pending"}
+                      onClick={() => void handleQuoteDecision(false)}
+                      type="button"
+                    >
+                      Decline
+                    </button>
+                  </div>
+                </div>
+
                 <form onSubmit={handleStatusUpdate} className="action-form">
                   <div className="repair-form-hint">
                     <span>Suggested next step</span>
@@ -962,6 +1727,261 @@ export function RepairsPage() {
                     Update Status
                   </button>
                 </form>
+
+                <form onSubmit={handleAddPart} className="action-form">
+                  <div className="repair-form-hint">
+                    <span>Parts used</span>
+                    <strong>{integer(selectedTicketParts.length)} line(s)</strong>
+                  </div>
+                  <div className="form-grid form-grid--two">
+                    <label>
+                      Find part
+                      <input
+                        value={partSearch}
+                        onChange={(event) => setPartSearch(event.target.value)}
+                        placeholder="Search catalog part, SKU, screen, battery..."
+                      />
+                    </label>
+                    <label>
+                      Part
+                      <select
+                        value={partForm.variant_id}
+                        onChange={(event) =>
+                          setPartForm((current) => ({
+                            ...current,
+                            variant_id: event.target.value,
+                            serialized_unit_id: "",
+                          }))
+                        }
+                      >
+                        <option value="">Select part</option>
+                        {partVariantOptions.map((variant) => (
+                          <option key={variant.id} value={variant.id}>
+                            {variant.label} / {variant.sku} /{" "}
+                            {titleize(variant.trackingType)}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                  </div>
+                  <div className="form-grid form-grid--two">
+                    <label>
+                      Quantity
+                      <input
+                        type="number"
+                        min="1"
+                        value={partForm.quantity}
+                        onChange={(event) =>
+                          setPartForm((current) => ({
+                            ...current,
+                            quantity: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                    {selectedPartVariant?.trackingType !== "bulk" ? (
+                      <label>
+                        Serial / IMEI unit
+                        <select
+                          value={partForm.serialized_unit_id}
+                          onChange={(event) =>
+                            setPartForm((current) => ({
+                              ...current,
+                              serialized_unit_id: event.target.value,
+                            }))
+                          }
+                        >
+                          <option value="">Select available unit</option>
+                          {serializedPartOptions.map((unit) => (
+                            <option key={unit.id} value={unit.id}>
+                              {unit.serial_number ?? unit.imei ?? unit.sku}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                    ) : (
+                      <div className="repair-form-hint repair-form-hint--inline">
+                        <span>Tracking</span>
+                        <strong>Bulk quantity part</strong>
+                      </div>
+                    )}
+                  </div>
+                  <button
+                    className="secondary-button"
+                    disabled={busy || !canLogParts(selectedTicket)}
+                  >
+                    Log Part Used
+                  </button>
+
+                  {selectedTicketParts.length ? (
+                    <div className="repair-parts-list">
+                      {selectedTicketParts.map((part) => (
+                        <article key={part.id}>
+                          <div>
+                            <strong>{repairPartLabel(part.variant_id)}</strong>
+                            <span>
+                              Qty {integer(part.quantity)} · Unit price{" "}
+                              {money(part.unit_price)}
+                            </span>
+                          </div>
+                          <button
+                            className="ghost-button"
+                            disabled={busy}
+                            onClick={() => void handleRemovePart(part.id)}
+                            type="button"
+                          >
+                            Remove
+                          </button>
+                        </article>
+                      ))}
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      No parts logged yet. Parts can be added after customer
+                      approval.
+                    </p>
+                  )}
+                </form>
+
+                <div className="action-form">
+                  <div className="repair-form-hint">
+                    <span>Invoice</span>
+                    <strong>
+                      {derivedInvoice
+                        ? `${money(derivedInvoice.due)} due`
+                        : "Not invoice-ready"}
+                    </strong>
+                  </div>
+                  {derivedInvoice ? (
+                    <div className="repair-invoice-card">
+                      <div>
+                        <span>Labor</span>
+                        <strong>{money(derivedInvoice.labor)}</strong>
+                      </div>
+                      <div>
+                        <span>Parts</span>
+                        <strong>{money(derivedInvoice.parts)}</strong>
+                      </div>
+                      <div>
+                        <span>Total</span>
+                        <strong>{money(derivedInvoice.total)}</strong>
+                      </div>
+                      <div>
+                        <span>Paid</span>
+                        <strong>{money(derivedInvoice.paid)}</strong>
+                      </div>
+                    </div>
+                  ) : (
+                    <p className="muted">
+                      Invoice appears after the quote is approved.
+                    </p>
+                  )}
+
+                  <label>
+                    Ready note
+                    <textarea
+                      value={readyNote}
+                      onChange={(event) => setReadyNote(event.target.value)}
+                      placeholder="Testing complete, customer notified..."
+                    />
+                  </label>
+                  <button
+                    className="secondary-button"
+                    disabled={busy || selectedTicket.status !== "repairing"}
+                    onClick={() => void handleMarkReady()}
+                    type="button"
+                  >
+                    Mark Ready for Pickup
+                  </button>
+                </div>
+
+                <form onSubmit={handleRepairPayment} className="action-form">
+                  <div className="repair-form-hint">
+                    <span>Repair payment</span>
+                    <strong>
+                      {tillSession
+                        ? "Till session open"
+                        : "No open till detected"}
+                    </strong>
+                  </div>
+                  <div className="form-grid form-grid--two">
+                    <label>
+                      Method
+                      <select
+                        value={paymentForm.method}
+                        onChange={(event) =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            method: event.target.value as typeof paymentForm.method,
+                          }))
+                        }
+                      >
+                        <option value="cash">Cash</option>
+                        <option value="mpesa">M-Pesa</option>
+                        <option value="card">Card</option>
+                        <option value="bank_transfer">Bank transfer</option>
+                        <option value="store_credit">Store credit</option>
+                      </select>
+                    </label>
+                    <label>
+                      Amount
+                      <input
+                        type="number"
+                        min="1"
+                        value={paymentForm.amount}
+                        onChange={(event) =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            amount: event.target.value,
+                          }))
+                        }
+                      />
+                    </label>
+                  </div>
+                  <label>
+                    Reference / notes
+                    <input
+                      value={paymentForm.provider_reference}
+                      onChange={(event) =>
+                        setPaymentForm((current) => ({
+                          ...current,
+                          provider_reference: event.target.value,
+                        }))
+                      }
+                      placeholder="M-Pesa code, card auth, cash note"
+                    />
+                  </label>
+                  <button
+                    className="primary-button"
+                    disabled={busy || !derivedInvoice || derivedInvoice.due <= 0}
+                  >
+                    Record Repair Payment
+                  </button>
+                </form>
+
+                <div className="action-form">
+                  <button
+                    className="primary-button"
+                    disabled={busy || !canCollectSelectedTicket()}
+                    onClick={() => void handleCollectRepair()}
+                    type="button"
+                  >
+                    Collect Device
+                  </button>
+                  <button
+                    className="ghost-button"
+                    disabled={
+                      busy ||
+                      ["ready_for_pickup", "collected", "cancelled"].includes(
+                        selectedTicket.status,
+                      )
+                    }
+                    onClick={() => void handleCancelRepair()}
+                    type="button"
+                  >
+                    Cancel Repair
+                  </button>
+                </div>
               </>
             ) : (
               <p className="muted">Select a repair ticket from the queue.</p>

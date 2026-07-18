@@ -1285,13 +1285,24 @@ button:disabled {
 .repair-diagnosis-note,
 .repair-next-action,
 .repair-form-hint,
-.repair-intake-helper {
+.repair-intake-helper,
+.repair-intake-summary {
   display: grid;
   gap: 5px;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #fff;
+}
+
+.repair-form-hint--inline {
+  align-self: end;
+  min-height: 64px;
+}
+
+.repair-intake-summary {
+  border-color: #b9d8f0;
+  background: #f4f9fd;
 }
 
 .repair-device-title span,
@@ -1302,6 +1313,7 @@ button:disabled {
 .repair-customer-card div span,
 .repair-alert-list span,
 .repair-form-hint span,
+.repair-intake-summary span,
 .repair-selected-meta small,
 .repair-intake-helper span,
 .repair-queue-table td span {
@@ -1370,6 +1382,52 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 999px;
   background: #fff;
+}
+
+.repair-parts-list {
+  display: grid;
+  gap: 8px;
+}
+
+.repair-parts-list article {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.repair-parts-list article div {
+  display: grid;
+  gap: 3px;
+}
+
+.repair-parts-list span {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.repair-invoice-card {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.repair-invoice-card div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.repair-invoice-card span {
+  color: var(--muted);
+  font-size: 12px;
 }
 
 .repair-queue-tools {
@@ -3277,6 +3335,10 @@ button:disabled {
   }
 
   .purchase-filter-bar {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .repair-invoice-card {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

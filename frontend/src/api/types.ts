@@ -604,6 +604,7 @@ export type RepairTicket = ModelResponse & {
   branch_id: UUID;
   customer_id: UUID;
   technician_id: UUID | null;
+  serialized_unit_id?: UUID | null;
   status: string;
   device_type: string;
   device_brand: string;
@@ -612,12 +613,34 @@ export type RepairTicket = ModelResponse & {
   imei: string | null;
   reported_issue: string;
   diagnosis: string | null;
+  intake_condition?: string | null;
+  intake_images?: string[];
+  accessories_received?: string[];
   labor_estimate: string;
   parts_estimate: string;
+  approved_at?: string | null;
   booked_for: string | null;
   received_at: string | null;
   ready_at: string | null;
   collected_at: string | null;
+  parts?: RepairPart[];
+  status_history?: RepairStatusHistory[];
+};
+
+export type RepairPart = ModelResponse & {
+  repair_ticket_id: UUID;
+  variant_id: UUID;
+  serialized_unit_id: UUID | null;
+  quantity: number;
+  unit_price: string;
+};
+
+export type RepairStatusHistory = ModelResponse & {
+  repair_ticket_id: UUID;
+  from_status: string | null;
+  to_status: string;
+  changed_by_id: UUID;
+  note: string | null;
 };
 
 export type PurchaseOrder = ModelResponse & {
@@ -844,4 +867,70 @@ export type RepairAssignmentPayload = {
 export type RepairStatusPayload = {
   status: string;
   note?: string | null;
+};
+
+export type RepairIntakePayload = {
+  serialized_unit_id?: UUID | null;
+  intake_condition: string;
+  intake_images?: string[];
+  accessories_received?: string[];
+};
+
+export type RepairDiagnosisPayload = {
+  diagnosis: string;
+  labor_estimate: string | number;
+  parts_estimate: string | number;
+};
+
+export type RepairQuoteDecisionPayload = {
+  approved: boolean;
+  note?: string | null;
+};
+
+export type RepairPartPayload = {
+  variant_id: UUID;
+  serialized_unit_id?: UUID | null;
+  quantity: number;
+};
+
+export type RepairNotePayload = {
+  note?: string | null;
+};
+
+export type RepairPaymentPayload = {
+  till_session_id: UUID;
+  method: "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit";
+  amount: string | number;
+  provider_reference?: string | null;
+  idempotency_key: string;
+  notes?: string | null;
+};
+
+export type RepairInvoice = {
+  ticket_id: UUID;
+  ticket_number: string;
+  branch_id: UUID;
+  customer_id: UUID;
+  customer_name: string;
+  customer_phone: string;
+  device_description: string;
+  labor_amount: string;
+  parts_amount: string;
+  total_amount: string;
+  paid_amount: string;
+  balance_due: string;
+  payment_status: string;
+  payments: Array<{
+    method: string;
+    amount: string;
+    provider_reference: string | null;
+    paid_at: string | null;
+  }>;
+};
+
+export type RepairCollection = {
+  ticket_id: UUID;
+  ticket_number: string;
+  status: string;
+  collected_at: string;
 };
