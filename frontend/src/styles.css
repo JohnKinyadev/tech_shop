@@ -390,7 +390,8 @@ button:disabled {
 }
 
 .erp-workspace--pos {
-  height: calc(100vh - 111px);
+  height: calc(100dvh - 111px);
+  min-height: 0;
   overflow: hidden;
   padding: 0;
 }
@@ -2535,6 +2536,8 @@ button:disabled {
   position: fixed;
   inset: 0;
   z-index: 50;
+  overflow: auto;
+  overscroll-behavior: contain;
   background: rgba(33, 50, 66, 0.5);
 }
 
@@ -2543,6 +2546,9 @@ button:disabled {
   inset: 0;
   display: grid;
   grid-template-rows: auto minmax(0, 1fr);
+  min-height: 0;
+  max-height: 100dvh;
+  overflow: hidden;
   background: var(--app-bg);
 }
 
@@ -2724,16 +2730,20 @@ button:disabled {
   display: grid;
   grid-template-columns: minmax(0, 1fr) 420px;
   gap: 15px;
+  min-height: 0;
+  overflow: hidden;
   padding: 15px;
 }
 
 .payment-method-panel,
 .numpad-panel {
+  min-height: 0;
   border: 1px solid var(--line);
   background: #fff;
 }
 
 .payment-method-panel {
+  overflow: auto;
   padding: 18px;
 }
 
@@ -2780,7 +2790,9 @@ button:disabled {
 .payment-attempts-panel {
   display: grid;
   gap: 8px;
+  max-height: min(36dvh, 360px);
   margin-bottom: 14px;
+  overflow: auto;
   padding: 10px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
@@ -2964,6 +2976,7 @@ button:disabled {
 .numpad-panel {
   display: grid;
   grid-template-rows: auto minmax(0, 1fr) auto;
+  overflow: hidden;
 }
 
 .numpad-display {
@@ -2977,6 +2990,8 @@ button:disabled {
 .numpad {
   display: grid;
   grid-template-columns: repeat(3, 1fr);
+  min-height: 0;
+  overflow: auto;
 }
 
 .numpad button {
@@ -3063,6 +3078,55 @@ button:disabled {
   .quick-payment-actions button,
   .order-actions button {
     min-height: 38px;
+  }
+
+  .payment-modal__header {
+    min-height: 62px;
+    padding: 9px 14px;
+  }
+
+  .payment-modal__header h2 {
+    font-size: 22px;
+  }
+
+  .payment-modal__header button {
+    height: 40px;
+  }
+
+  .payment-modal__body {
+    gap: 10px;
+    padding: 10px;
+  }
+
+  .payment-method-panel {
+    padding: 12px;
+  }
+
+  .payment-methods {
+    margin-bottom: 12px;
+  }
+
+  .payment-methods button {
+    min-height: 40px;
+  }
+
+  .payment-attempts-panel {
+    max-height: min(30dvh, 260px);
+  }
+
+  .numpad-display {
+    padding: 12px;
+    font-size: 22px;
+  }
+
+  .numpad button {
+    min-height: 54px;
+    font-size: 18px;
+  }
+
+  .confirm-payment {
+    min-height: 50px;
+    font-size: 16px;
   }
 
   .pos-search-row {
