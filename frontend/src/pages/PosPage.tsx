@@ -246,6 +246,10 @@ export function PosPage() {
   );
   const discount = 0;
   const total = Math.max(0, subtotal - discount);
+  const paymentSubtotal = pendingSale ? Number(pendingSale.subtotal) : subtotal;
+  const paymentDiscount = pendingSale ? Number(pendingSale.discount_amount) : discount;
+  const paymentTotal = pendingSale ? Number(pendingSale.total_amount) : total;
+  const isRecoveringPendingSale = Boolean(pendingSale && cart.length === 0);
   const splitCashAmount = Number(splitAmounts.cash) || 0;
   const splitMpesaAmount = Number(splitAmounts.mpesa) || 0;
   const splitCardAmount = Number(splitAmounts.card) || 0;
@@ -279,6 +283,27 @@ export function PosPage() {
     } finally {
       setHistoryBusy(false);
     }
+  }
+
+  function openManualMpesaRecovery(sale: PosSale) {
+    if (cart.length) {
+      setNotice(
+        "Finish or clear the current cart before confirming a delayed M-Pesa sale.",
+      );
+      return;
+    }
+
+    setPendingSale(sale);
+    setPaymentMethod("mpesa");
+    setPaymentReference("");
+    setMpesaPhone("");
+    setMpesaReceiptCode("");
+    setSplitAmounts({ cash: "", mpesa: "", card: "" });
+    setSplitCardReference("");
+    setPaymentStatus(
+      `Enter the customer's M-Pesa receipt code to complete ${sale.invoice_number}.`,
+    );
+    setPaymentOpen(true);
   }
 
   function printReceipt() {
@@ -544,6 +569,11 @@ export function PosPage() {
       setPaymentOpen(false);
       setCart([]);
       setNotice("Preview sale completed locally. Sign in to record a live POS sale.");
+      return;
+    }
+
+    if (isRecoveringPendingSale) {
+      setNotice("Enter the M-Pesa receipt code, then use Confirm M-Pesa Payment.");
       return;
     }
 
@@ -1117,12 +1147,23 @@ export function PosPage() {
                       {sale.status.replace(/_/g, " ")}
                     </StatusPill>
                     <strong>{money(Number(sale.total_amount))}</strong>
-                    <button
-                      disabled={sale.status !== "completed" || historyBusy}
-                      onClick={() => void openReceiptViewer(sale.id)}
-                    >
-                      Receipt
-                    </button>
+                    <div className="sales-history-actions">
+                      {sale.status === "pending_payment" && (
+                        <button
+                          type="button"
+                          disabled={historyBusy}
+                          onClick={() => openManualMpesaRecovery(sale)}
+                        >
+                          Confirm M-Pesa
+                        </button>
+                      )}
+                      <button
+                        disabled={sale.status !== "completed" || historyBusy}
+                        onClick={() => void openReceiptViewer(sale.id)}
+                      >
+                        Receipt
+                      </button>
+                    </div>
                   </article>
                 ))}
               </div>
@@ -1275,7 +1316,7 @@ export function PosPage() {
             <header className="payment-modal__header">
               <div>
                 <p className="eyebrow">Payment</p>
-                <h2>{money(total)}</h2>
+                <h2>{money(paymentTotal)}</h2>
                 <span>Cashier: {user?.full_name}</span>
               </div>
               <button onClick={() => setPaymentOpen(false)}>Close</button>
@@ -1429,22 +1470,22 @@ export function PosPage() {
                   <tbody>
                     <tr>
                       <th>Subtotal</th>
-                      <td>{money(subtotal)}</td>
+                      <td>{money(paymentSubtotal)}</td>
                     </tr>
                     <tr>
                       <th>Discount</th>
-                      <td>{money(discount)}</td>
+                      <td>{money(paymentDiscount)}</td>
                     </tr>
                     <tr>
                       <th>Net Payable</th>
-                      <td>{money(total)}</td>
+                      <td>{money(paymentTotal)}</td>
                     </tr>
                   </tbody>
                 </table>
               </section>
 
               <section className="numpad-panel">
-                <div className="numpad-display">{money(total)}</div>
+                <div className="numpad-display">{money(paymentTotal)}</div>
                 <div className="numpad">
                   {["7", "8", "9", "4", "5", "6", "1", "2", "3", "0", ".", "Clear"].map(
                     (key) => (
@@ -1454,10 +1495,12 @@ export function PosPage() {
                 </div>
                 <button
                   className="success-button confirm-payment"
-                  disabled={paymentBusy}
+                  disabled={paymentBusy || isRecoveringPendingSale}
                   onClick={completePayment}
                 >
-                  {paymentBusy
+                  {isRecoveringPendingSale
+                    ? "Use Receipt Code Above"
+                    : paymentBusy
                     ? paymentMethod === "mpesa"
                       ? "Waiting for M-Pesa..."
                       : paymentMethod === "split"

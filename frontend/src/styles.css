@@ -2498,6 +2498,12 @@ button:disabled {
   background: #fff;
 }
 
+.sales-history-row .sales-history-actions {
+  display: flex;
+  gap: 6px;
+  justify-content: flex-end;
+}
+
 .sales-history-empty {
   padding: 10px;
   border: 1px dashed var(--line);
