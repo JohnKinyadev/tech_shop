@@ -1455,7 +1455,7 @@ button:disabled {
 
 .report-filter-bar {
   display: grid;
-  grid-template-columns: minmax(220px, 1fr) repeat(2, minmax(160px, 0.45fr)) auto;
+  grid-template-columns: minmax(150px, 0.45fr) minmax(220px, 1fr) repeat(2, minmax(160px, 0.45fr)) auto;
   gap: 12px;
   align-items: end;
   padding: 12px;
@@ -1479,9 +1479,40 @@ button:disabled {
   outline: none;
 }
 
-.report-insight-grid {
+.report-context-strip,
+.report-attention-grid {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 10px;
+}
+
+.report-context-strip article,
+.report-attention-grid article {
+  display: grid;
+  gap: 6px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  box-shadow: var(--shadow);
+}
+
+.report-context-strip span,
+.report-attention-grid span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+  line-height: 1.4;
+}
+
+.report-context-strip strong,
+.report-attention-grid strong {
+  min-width: 0;
+}
+
+.report-insight-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
   gap: 12px;
 }
 
@@ -1555,6 +1586,12 @@ button:disabled {
   height: 100%;
   border-radius: inherit;
   background: linear-gradient(90deg, var(--primary), #17a78b);
+}
+
+.report-table-share {
+  display: grid;
+  min-width: 120px;
+  gap: 5px;
 }
 
 .report-status-list article {
@@ -3339,6 +3376,12 @@ button:disabled {
   }
 
   .repair-invoice-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .report-filter-bar,
+  .report-context-strip,
+  .report-attention-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

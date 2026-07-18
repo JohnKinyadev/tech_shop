@@ -43,12 +43,55 @@ function marginPercent(profit: string, revenue: string) {
   return percentage(profit, revenue);
 }
 
+type DatePreset = "today" | "last_7" | "last_30" | "this_month" | "custom";
+
+const datePresets: Array<{ value: DatePreset; label: string }> = [
+  { value: "today", label: "Today" },
+  { value: "last_7", label: "Last 7 days" },
+  { value: "last_30", label: "Last 30 days" },
+  { value: "this_month", label: "This month" },
+  { value: "custom", label: "Custom" },
+];
+
+function inputDate(value: Date) {
+  const year = value.getFullYear();
+  const month = String(value.getMonth() + 1).padStart(2, "0");
+  const day = String(value.getDate()).padStart(2, "0");
+  return `${year}-${month}-${day}`;
+}
+
+function presetRange(preset: DatePreset) {
+  const today = new Date();
+  if (preset === "custom") return { start: "", end: "" };
+  if (preset === "today") return { start: inputDate(today), end: inputDate(today) };
+  if (preset === "this_month") {
+    return {
+      start: inputDate(new Date(today.getFullYear(), today.getMonth(), 1)),
+      end: inputDate(today),
+    };
+  }
+  const days = preset === "last_7" ? 6 : 29;
+  const start = new Date(today);
+  start.setDate(today.getDate() - days);
+  return { start: inputDate(start), end: inputDate(today) };
+}
+
+function readableDate(value: string) {
+  if (!value) return "";
+  const date = new Date(`${value}T00:00:00`);
+  if (Number.isNaN(date.getTime())) return value;
+  return new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(date);
+}
+
 export function ReportsPage() {
   const { token, isPreview, user } = useAuth();
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
   const [selectedBranchId, setSelectedBranchId] = useState(user?.branch_id ?? "all");
-  const [startDate, setStartDate] = useState("");
-  const [endDate, setEndDate] = useState("");
+  const [datePreset, setDatePreset] = useState<DatePreset>("this_month");
+  const [startDate, setStartDate] = useState(
+    () => presetRange("this_month").start,
+  );
+  const [endDate, setEndDate] = useState(() => presetRange("this_month").end);
   const [sales, setSales] = useState<SalesSummary>(demoDashboard.sales);
   const [inventory, setInventory] = useState<InventorySummary>(
     demoDashboard.inventory,
@@ -80,6 +123,80 @@ export function ReportsPage() {
         numberValue(repairs.parts_revenue_total)) /
       repairs.ticket_count
     : 0;
+  const operatingRevenue =
+    numberValue(sales.net_sales) + numberValue(repairs.payment_total);
+  const expenseRatio = percentage(expenses.total_approved_expenses, operatingRevenue);
+  const repairCollectionRate = percentage(
+    repairs.collected_ticket_count,
+    repairs.ticket_count,
+  );
+  const stockAvailability = percentage(
+    inventory.total_available,
+    inventory.total_on_hand,
+  );
+  const refundRate = percentage(sales.refund_amount, sales.gross_sales);
+  const discountRate = percentage(sales.discount_amount, sales.gross_sales);
+  const branchLabel =
+    selectedBranchId === "all"
+      ? "All branches"
+      : branches.find((branch) => branch.id === selectedBranchId)?.name ??
+        "Selected branch";
+  const periodLabel =
+    startDate && endDate
+      ? `${readableDate(startDate)} — ${readableDate(endDate)}`
+      : startDate
+        ? `From ${readableDate(startDate)}`
+        : endDate
+          ? `Until ${readableDate(endDate)}`
+          : "All available dates";
+  const inventoryContext =
+    selectedBranchId === "all"
+      ? "Inventory is current across accessible branches"
+      : `Inventory is current for ${branchLabel}`;
+
+  const attentionItems: Array<{
+    label: string;
+    value: string;
+    detail: string;
+    tone: StatusTone;
+  }> = [
+    {
+      label: "Low-stock items",
+      value: integer(inventory.low_stock_count),
+      detail:
+        inventory.low_stock_count > 0
+          ? "Review purchasing and reorder levels"
+          : "No urgent reorder pressure",
+      tone: inventory.low_stock_count ? "warning" : "success",
+    },
+    {
+      label: "Pending expenses",
+      value: integer(expenses.pending_expense_count),
+      detail:
+        expenses.pending_expense_count > 0
+          ? "Approvals still affect profit clarity"
+          : "Expense queue is clear",
+      tone: expenses.pending_expense_count ? "warning" : "success",
+    },
+    {
+      label: "Ready repairs",
+      value: integer(repairs.ready_ticket_count),
+      detail:
+        repairs.ready_ticket_count > 0
+          ? "Call customers and collect balances"
+          : "No pickup pile-up",
+      tone: repairs.ready_ticket_count ? "info" : "success",
+    },
+    {
+      label: "Refund pressure",
+      value: `${refundRate}%`,
+      detail:
+        refundRate > 5
+          ? "Refunds are material for this period"
+          : "Refunds are under control",
+      tone: refundRate > 5 ? "warning" : "success",
+    },
+  ];
 
   const insights: Array<{
     label: string;
@@ -92,6 +209,12 @@ export function ReportsPage() {
       value: money(cashAfterExpenses),
       detail: "Sales + repair payments - approved expenses",
       tone: cashAfterExpenses >= 0 ? "success" : "danger",
+    },
+    {
+      label: "Operating revenue",
+      value: money(operatingRevenue),
+      detail: "Net sales + repair payments",
+      tone: operatingRevenue > 0 ? "success" : "neutral",
     },
     {
       label: "Top-item gross profit",
@@ -113,7 +236,21 @@ export function ReportsPage() {
       detail: "Labor + parts estimates per ticket",
       tone: "info",
     },
+    {
+      label: "Expense ratio",
+      value: `${expenseRatio}%`,
+      detail: "Approved expenses vs operating revenue",
+      tone: expenseRatio > 35 ? "warning" : "success",
+    },
   ];
+
+  function applyDatePreset(preset: DatePreset) {
+    setDatePreset(preset);
+    if (preset === "custom") return;
+    const range = presetRange(preset);
+    setStartDate(range.start);
+    setEndDate(range.end);
+  }
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -213,6 +350,19 @@ export function ReportsPage() {
 
       <section className="panel-card report-filter-bar">
         <label>
+          Date preset
+          <select
+            value={datePreset}
+            onChange={(event) => applyDatePreset(event.target.value as DatePreset)}
+          >
+            {datePresets.map((preset) => (
+              <option key={preset.value} value={preset.value}>
+                {preset.label}
+              </option>
+            ))}
+          </select>
+        </label>
+        <label>
           Branch
           <select
             value={selectedBranchId}
@@ -231,7 +381,10 @@ export function ReportsPage() {
           <input
             type="date"
             value={startDate}
-            onChange={(event) => setStartDate(event.target.value)}
+            onChange={(event) => {
+              setDatePreset("custom");
+              setStartDate(event.target.value);
+            }}
           />
         </label>
         <label>
@@ -239,20 +392,47 @@ export function ReportsPage() {
           <input
             type="date"
             value={endDate}
-            onChange={(event) => setEndDate(event.target.value)}
+            onChange={(event) => {
+              setDatePreset("custom");
+              setEndDate(event.target.value);
+            }}
           />
         </label>
         <button
           className="secondary-button"
           type="button"
           onClick={() => {
-            setStartDate("");
-            setEndDate("");
+            const range = presetRange("this_month");
+            setDatePreset("this_month");
+            setStartDate(range.start);
+            setEndDate(range.end);
             setSelectedBranchId(user?.branch_id ?? "all");
           }}
         >
-          Reset Filters
+          Reset Month
         </button>
+      </section>
+
+      <section className="report-context-strip">
+        <article>
+          <span>Branch scope</span>
+          <strong>{branchLabel}</strong>
+        </article>
+        <article>
+          <span>Report period</span>
+          <strong>{periodLabel}</strong>
+        </article>
+        <article>
+          <span>Inventory context</span>
+          <strong>{inventoryContext}</strong>
+        </article>
+        <article>
+          <span>Generated view</span>
+          <strong>{new Intl.DateTimeFormat("en-KE", {
+            dateStyle: "medium",
+            timeStyle: "short",
+          }).format(new Date())}</strong>
+        </article>
       </section>
 
       {notice && <div className="notice notice--page">{notice}</div>}
@@ -285,6 +465,18 @@ export function ReportsPage() {
           </StatusPill>
         </article>
       </div>
+
+      <section className="report-attention-grid">
+        {attentionItems.map((item) => (
+          <article key={item.label}>
+            <div>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+            </div>
+            <StatusPill tone={item.tone}>{item.detail}</StatusPill>
+          </article>
+        ))}
+      </section>
 
       <section className="report-insight-grid">
         {insights.map((insight) => (
@@ -394,27 +586,39 @@ export function ReportsPage() {
                 <th>On hand</th>
                 <th>Available</th>
                 <th>Reorder</th>
+                <th>Pressure</th>
                 <th>Value</th>
               </tr>
             </thead>
             <tbody>
               {inventory.low_stock_items.length ? (
-                inventory.low_stock_items.map((item) => (
-                  <tr key={item.sku}>
-                    <td>{item.sku}</td>
-                    <td>
-                      {item.product_name}
-                      <span>{item.variant_name}</span>
-                    </td>
-                    <td>{integer(item.quantity_on_hand)}</td>
-                    <td>{integer(item.available_quantity)}</td>
-                    <td>{integer(item.reorder_level)}</td>
-                    <td>{money(item.stock_value)}</td>
-                  </tr>
-                ))
+                inventory.low_stock_items.map((item) => {
+                  const shortage = Math.max(
+                    0,
+                    item.reorder_level - item.available_quantity,
+                  );
+                  return (
+                    <tr key={item.sku}>
+                      <td>{item.sku}</td>
+                      <td>
+                        {item.product_name}
+                        <span>{item.variant_name}</span>
+                      </td>
+                      <td>{integer(item.quantity_on_hand)}</td>
+                      <td>{integer(item.available_quantity)}</td>
+                      <td>{integer(item.reorder_level)}</td>
+                      <td>
+                        <StatusPill tone={shortage > 5 ? "danger" : "warning"}>
+                          {integer(shortage)} short
+                        </StatusPill>
+                      </td>
+                      <td>{money(item.stock_value)}</td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
-                  <td colSpan={6} className="empty-table-cell">
+                  <td colSpan={7} className="empty-table-cell">
                     No low-stock pressure right now.
                   </td>
                 </tr>
@@ -438,7 +642,9 @@ export function ReportsPage() {
                   <article key={item.status}>
                     <div>
                       <strong>{titleize(item.status)}</strong>
-                      <span>{integer(item.ticket_count)} ticket(s)</span>
+                      <span>
+                        {integer(item.ticket_count)} ticket(s) · {share}% of queue
+                      </span>
                     </div>
                     <div className="report-bar">
                       <span style={{ width: `${share}%` }} />
@@ -472,16 +678,27 @@ export function ReportsPage() {
             </thead>
             <tbody>
               {expenses.by_category.length ? (
-                expenses.by_category.map((category) => (
-                  <tr key={category.category_name}>
-                    <td>{category.category_name}</td>
-                    <td>{integer(category.expense_count)}</td>
-                    <td>{money(category.amount)}</td>
-                    <td>
-                      {percentage(category.amount, expenses.total_approved_expenses)}%
-                    </td>
-                  </tr>
-                ))
+                expenses.by_category.map((category) => {
+                  const share = percentage(
+                    category.amount,
+                    expenses.total_approved_expenses,
+                  );
+                  return (
+                    <tr key={category.category_name}>
+                      <td>{category.category_name}</td>
+                      <td>{integer(category.expense_count)}</td>
+                      <td>{money(category.amount)}</td>
+                      <td>
+                        <div className="report-table-share">
+                          <strong>{share}%</strong>
+                          <div className="report-bar">
+                            <span style={{ width: `${share}%` }} />
+                          </div>
+                        </div>
+                      </td>
+                    </tr>
+                  );
+                })
               ) : (
                 <tr>
                   <td colSpan={4} className="empty-table-cell">
@@ -506,16 +723,26 @@ export function ReportsPage() {
               <span>Refunds recorded against {integer(sales.sale_count)} sale(s).</span>
             </article>
             <article>
-              <strong>{money(sales.discount_amount)}</strong>
-              <span>Discounts given during the selected period.</span>
+              <strong>{discountRate}%</strong>
+              <span>{money(sales.discount_amount)} given as discounts.</span>
+            </article>
+            <article>
+              <strong>{repairCollectionRate}%</strong>
+              <span>Repair collection rate in the selected period.</span>
+            </article>
+            <article>
+              <strong>{stockAvailability}%</strong>
+              <span>
+                Stock availability across {integer(inventory.stock_balance_count)} balances.
+              </span>
             </article>
             <article>
               <strong>{integer(repairs.open_ticket_count)}</strong>
               <span>Open repair ticket(s) still on the bench.</span>
             </article>
             <article>
-              <strong>{integer(inventory.total_available)}</strong>
-              <span>Available sellable units across tracked stock balances.</span>
+              <strong>{expenseRatio}%</strong>
+              <span>Expense ratio against operating revenue.</span>
             </article>
           </div>
         </section>
