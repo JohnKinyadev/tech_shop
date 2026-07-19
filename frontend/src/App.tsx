@@ -13,11 +13,17 @@ import { ReportsPage } from "./pages/ReportsPage";
 import { RoleStudioPage } from "./pages/RoleStudioPage";
 import { SettingsPage } from "./pages/SettingsPage";
 import { useAuth } from "./state/auth";
+import { getStoredTheme, persistTheme, type ThemeChoice } from "./state/theme";
 
 export function App() {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState<AppView>("dashboard");
+  const [theme, setTheme] = useState<ThemeChoice>(getStoredTheme);
   const safeView = user && canAccessView(user, activeView) ? activeView : firstAccessibleView(user);
+
+  useEffect(() => {
+    persistTheme(theme);
+  }, [theme]);
 
   useEffect(() => {
     if (user && activeView !== safeView) {
@@ -44,7 +50,12 @@ export function App() {
   }
 
   return (
-    <AppShell activeView={safeView} onViewChange={setActiveView}>
+    <AppShell
+      activeView={safeView}
+      onViewChange={setActiveView}
+      theme={theme}
+      onThemeChange={setTheme}
+    >
       {renderView(safeView)}
     </AppShell>
   );

@@ -1,4 +1,5 @@
-:root {
+:root,
+:root[data-theme="theme-1"] {
   color-scheme: light;
   --app-bg: #e4ebf2;
   --panel: #ffffff;
@@ -10,6 +11,7 @@
   --primary: #247dbd;
   --primary-dark: #1e669b;
   --nav: #4e5381;
+  --blue: #247dbd;
   --success: #5cb85c;
   --success-dark: #449d44;
   --danger: #c9252d;
@@ -19,6 +21,27 @@
   --radius: 3px;
   --shadow: 0 1px 2px rgba(33, 50, 66, 0.12);
   font-family: "Open Sans", "Segoe UI", Arial, sans-serif;
+}
+
+:root[data-theme="theme-2"] {
+  --app-bg: #e7efe9;
+  --panel: #ffffff;
+  --panel-soft: #f5faf7;
+  --line: #d5e2d9;
+  --line-strong: #b8cdbc;
+  --text: #1f352a;
+  --muted: #667b70;
+  --primary: #16835f;
+  --primary-dark: #116c4d;
+  --nav: #184d3a;
+  --blue: #16835f;
+  --success: #2fa46d;
+  --success-dark: #23885a;
+  --danger: #c9252d;
+  --warning: #e7a42f;
+  --info: #138f7a;
+  --purple: #768f3d;
+  --shadow: 0 1px 2px rgba(31, 53, 42, 0.12);
 }
 
 * {
@@ -358,6 +381,38 @@ button:disabled {
   color: #fff;
   border-color: rgba(255, 255, 255, 0.24);
   background: rgba(0, 0, 0, 0.14);
+}
+
+.theme-picker {
+  display: flex;
+  align-items: center;
+  gap: 7px;
+  padding: 5px 8px;
+  border: 1px solid rgba(255, 255, 255, 0.22);
+  border-radius: var(--radius);
+  background: rgba(0, 0, 0, 0.1);
+}
+
+.theme-picker span {
+  color: rgba(255, 255, 255, 0.72);
+  font-size: 11px;
+  font-weight: 700;
+  text-transform: uppercase;
+}
+
+.theme-picker select {
+  height: 28px;
+  min-width: 142px;
+  color: #fff;
+  border: 0;
+  outline: 0;
+  background: transparent;
+  font-weight: 700;
+}
+
+.theme-picker option {
+  color: var(--text);
+  background: var(--panel);
 }
 
 .module-nav {

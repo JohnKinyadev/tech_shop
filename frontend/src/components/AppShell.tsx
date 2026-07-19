@@ -4,6 +4,7 @@ import { BrandMark } from "./BrandMark";
 import { StatusPill } from "./StatusPill";
 import type { CurrentUser } from "../api/types";
 import { useAuth } from "../state/auth";
+import { isThemeChoice, themeOptions, type ThemeChoice } from "../state/theme";
 
 export type AppView =
   | "dashboard"
@@ -20,6 +21,8 @@ export type AppView =
 type AppShellProps = {
   activeView: AppView;
   onViewChange: (view: AppView) => void;
+  theme: ThemeChoice;
+  onThemeChange: (theme: ThemeChoice) => void;
   children: ReactNode;
 };
 
@@ -129,10 +132,22 @@ export function firstAccessibleView(user: CurrentUser | null): AppView {
   return navItems.find((item) => canAccessView(user, item.key))?.key ?? "dashboard";
 }
 
-export function AppShell({ activeView, onViewChange, children }: AppShellProps) {
+export function AppShell({
+  activeView,
+  onViewChange,
+  theme,
+  onThemeChange,
+  children,
+}: AppShellProps) {
   const { user, signOut, isPreview } = useAuth();
   const visibleNavItems = navItems.filter((item) => canAccessView(user, item.key));
   const branchScope = user && !hasGlobalAccess(user) ? "Assigned branch" : "All branches";
+
+  function handleThemeChange(value: string) {
+    if (isThemeChoice(value)) {
+      onThemeChange(value);
+    }
+  }
 
   return (
     <div className="erp-app">
@@ -144,6 +159,20 @@ export function AppShell({ activeView, onViewChange, children }: AppShellProps) 
 
         <div className="erp-topbar__actions">
           {isPreview && <StatusPill tone="warning">Preview mode</StatusPill>}
+          <label className="theme-picker">
+            <span>Theme</span>
+            <select
+              value={theme}
+              onChange={(event) => handleThemeChange(event.target.value)}
+              aria-label="Workspace theme"
+            >
+              {themeOptions.map((option) => (
+                <option key={option.value} value={option.value}>
+                  {option.label} — {option.description}
+                </option>
+              ))}
+            </select>
+          </label>
           <div className="operator-card">
             <strong>{user?.full_name}</strong>
             <small>{user?.role_name}</small>
