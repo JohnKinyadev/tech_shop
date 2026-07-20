@@ -2254,7 +2254,7 @@ button:disabled {
 
 .pos-order-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   min-height: 0;
   min-width: 0;
   border-right: 2px solid #fff;
@@ -2334,6 +2334,45 @@ button:disabled {
   border-radius: var(--radius);
   background: var(--panel-soft);
   outline: none;
+}
+
+.order-status-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 1px;
+  border-bottom: 1px solid var(--line);
+  background: var(--line);
+}
+
+.order-status-strip span {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  padding: 8px 10px;
+  color: var(--muted);
+  background: #fff;
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.order-status-strip strong {
+  overflow: hidden;
+  color: var(--text);
+  font-size: 14px;
+  text-overflow: ellipsis;
+  text-transform: none;
+  white-space: nowrap;
+}
+
+.order-status-strip .is-ready {
+  color: #1f6f2d;
+  background: #eef9ee;
+}
+
+.order-status-strip .is-warning {
+  color: #8a5b00;
+  background: #fff8e8;
 }
 
 .order-list {
@@ -2479,6 +2518,7 @@ button:disabled {
   border: 0;
   border-right: 1px solid var(--line);
   background: #fff;
+  color: var(--muted);
 }
 
 .order-keypad-actions button:last-child {
@@ -2487,7 +2527,7 @@ button:disabled {
 
 .quick-payment-actions {
   display: grid;
-  grid-template-columns: repeat(3, 1fr);
+  grid-template-columns: repeat(4, 1fr);
   border-top: 1px solid var(--line);
 }
 
@@ -2614,6 +2654,27 @@ button:disabled {
   border-left: 1px solid var(--line);
   border-radius: 0;
   font-size: 16px;
+}
+
+.pos-result-chip {
+  display: grid;
+  min-width: 132px;
+  min-height: 44px;
+  align-content: center;
+  gap: 2px;
+  text-align: left;
+}
+
+.pos-result-chip strong {
+  color: var(--text);
+  font-size: 15px;
+}
+
+.pos-result-chip span {
+  color: var(--muted);
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
 }
 
 .category-list {
@@ -3363,14 +3424,34 @@ button:disabled {
   background: var(--panel-soft);
 }
 
-.split-payment-panel > div {
+.split-payment-summary {
   display: grid;
   grid-column: 1 / -1;
-  gap: 3px;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 5px 10px;
+  align-items: center;
 }
 
-.split-payment-panel > div span {
+.split-payment-summary > span {
+  grid-column: 1 / -1;
   color: var(--muted);
+}
+
+.split-payment-tools {
+  display: grid;
+  grid-column: 1 / -1;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 6px;
+}
+
+.split-payment-tools button {
+  min-height: 32px;
+  padding: 5px 8px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  font-weight: 700;
 }
 
 .split-payment-panel label {

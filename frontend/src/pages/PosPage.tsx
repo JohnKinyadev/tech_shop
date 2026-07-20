@@ -50,6 +50,7 @@ type PaymentMethod = "cash" | "mpesa" | "card" | "split";
 type SplitMethod = "cash" | "mpesa" | "card";
 type PosWorkspaceTab = "products" | "receipts" | "held";
 type SalesHistoryStatus = "all" | "completed" | "pending_payment" | "cancelled";
+type SplitBalanceState = "ready" | "remaining" | "over";
 
 type HeldOrder = {
   id: string;
@@ -109,6 +110,18 @@ function paymentStatusTone(status: string): StatusTone {
 function tillVariance(session: TillSession | null) {
   if (!session?.expected_cash || !session.closing_cash) return null;
   return Number(session.closing_cash) - Number(session.expected_cash);
+}
+
+function splitBalanceState(balance: number): SplitBalanceState {
+  if (Math.round(balance * 100) === 0) return "ready";
+  return balance < 0 ? "over" : "remaining";
+}
+
+function splitBalanceLabel(balance: number) {
+  const state = splitBalanceState(balance);
+  if (state === "ready") return "Balanced";
+  if (state === "over") return `Over by ${money(Math.abs(balance))}`;
+  return `${money(balance)} remaining`;
 }
 
 function productsFromApi(products: CatalogProduct[]): PosProduct[] {
@@ -311,6 +324,18 @@ export function PosPage() {
   const splitCardAmount = Number(splitAmounts.card) || 0;
   const splitTotal = splitCashAmount + splitMpesaAmount + splitCardAmount;
   const splitBalance = paymentOutstanding - splitTotal;
+  const splitState = splitBalanceState(splitBalance);
+  const splitTone: StatusTone =
+    splitState === "ready" ? "success" : splitState === "over" ? "danger" : "warning";
+  const cartUnitCount = cart.reduce((count, item) => count + item.quantity, 0);
+  const missingSerializedUnits = cart.filter(
+    (item) => item.trackingType !== "bulk" && !item.serializedUnitId,
+  ).length;
+  const checkoutIsReady =
+    cart.length > 0 &&
+    missingSerializedUnits === 0 &&
+    (!token || isPreview || Boolean(tillSession)) &&
+    (!token || isPreview || catalogLive);
 
   async function refreshRecentSales() {
     if (!token || isPreview || !user?.branch_id) return;
@@ -453,6 +478,60 @@ export function PosPage() {
   function discardHeldOrder(orderId: string) {
     setHeldOrders((current) => current.filter((item) => item.id !== orderId));
     setNotice("Held order removed.");
+  }
+
+  function startNewOrder() {
+    if (pendingSale) {
+      setNotice("Complete or cancel the current invoice before starting a new order.");
+      return;
+    }
+    if (cart.length) {
+      setNotice("Hold or clear the current cart before starting a new order.");
+      return;
+    }
+
+    setCustomerName("");
+    setCustomerPhone("");
+    setReceipt(null);
+    setPaymentStatus(null);
+    setPaymentReference("");
+    setMpesaPhone("");
+    setMpesaReceiptCode("");
+    setSplitAmounts({ cash: "", mpesa: "", card: "" });
+    setSplitCardReference("");
+    setActiveCategory("All");
+    setActiveWorkspaceTab("products");
+    setQuery("");
+    setNotice("New order is ready.");
+  }
+
+  function explainOrderControl(control: "Qty" | "Price" | "Disc %" | "Disc KES") {
+    if (control === "Qty") {
+      setNotice(
+        "Use the + and - buttons on each cart line. Serialized/IMEI items are added one physical unit at a time.",
+      );
+      return;
+    }
+
+    setNotice(
+      `${control} controls will be enabled once manager price and discount approval rules are switched on.`,
+    );
+  }
+
+  function showProductInformationHint() {
+    setNotice(
+      `${filtered.length} product(s) visible. Click a product to add it, or open Catalog for full specs, images, and pricing setup.`,
+    );
+  }
+
+  function fillSplitAmount(method: SplitMethod) {
+    const currentMethodAmount = Number(splitAmounts[method]) || 0;
+    const otherMethodsTotal = splitTotal - currentMethodAmount;
+    const remaining = Math.max(0, paymentOutstanding - otherMethodsTotal);
+    setSplitAmounts((current) => ({
+      ...current,
+      [method]: remaining ? String(remaining) : "",
+    }));
   }
 
   async function cancelUnpaidSale(sale?: PosSale | null) {
@@ -1110,7 +1189,14 @@ export function PosPage() {
             <strong>Held</strong>
             <span>{heldOrders.length} orders</span>
           </button>
-          <button className="orders-tab orders-tab--add">+</button>
+          <button
+            className="orders-tab orders-tab--add"
+            type="button"
+            onClick={startNewOrder}
+            title="Start a new blank order"
+          >
+            +
+          </button>
         </header>
 
         <div className="customer-strip customer-strip--editable">
@@ -1136,6 +1222,27 @@ export function PosPage() {
               placeholder="0712 345 678"
             />
           </label>
+        </div>
+
+        <div className="order-status-strip">
+          <span>
+            <strong>{cart.length}</strong> line(s)
+          </span>
+          <span>
+            <strong>{cartUnitCount}</strong> unit(s)
+          </span>
+          <span>
+            <strong>{money(total)}</strong> total
+          </span>
+          <span className={checkoutIsReady ? "is-ready" : "is-warning"}>
+            {checkoutIsReady
+              ? "Ready"
+              : missingSerializedUnits
+                ? `${missingSerializedUnits} serial needed`
+                : tillSession || isPreview
+                  ? "Add items"
+                  : "Open till"}
+          </span>
         </div>
 
         <div className="order-list">
@@ -1215,16 +1322,30 @@ export function PosPage() {
           </div>
 
           <div className="order-keypad-actions">
-            <button>Qty</button>
-            <button>Price</button>
-            <button>Disc %</button>
-            <button>Disc KES</button>
+            {(["Qty", "Price", "Disc %", "Disc KES"] as const).map((control) => (
+              <button
+                key={control}
+                type="button"
+                onClick={() => explainOrderControl(control)}
+              >
+                {control}
+              </button>
+            ))}
           </div>
 
           <div className="quick-payment-actions" aria-label="Quick payment methods">
-            <button onClick={() => openPaymentWithMethod("cash")}>Cash</button>
-            <button onClick={() => openPaymentWithMethod("mpesa")}>M-Pesa</button>
-            <button onClick={() => openPaymentWithMethod("card")}>Card</button>
+            <button type="button" onClick={() => openPaymentWithMethod("cash")}>
+              Cash
+            </button>
+            <button type="button" onClick={() => openPaymentWithMethod("mpesa")}>
+              M-Pesa
+            </button>
+            <button type="button" onClick={() => openPaymentWithMethod("card")}>
+              Card
+            </button>
+            <button type="button" onClick={() => openPaymentWithMethod("split")}>
+              Split
+            </button>
           </div>
 
           <div className="order-actions">
@@ -1288,7 +1409,14 @@ export function PosPage() {
                     autoFocus
                   />
                 </label>
-                <button className="info-button">Product Information</button>
+                <button
+                  className="info-button pos-result-chip"
+                  type="button"
+                  onClick={showProductInformationHint}
+                >
+                  <strong>{filtered.length}</strong>
+                  <span>{catalogLive ? "Live catalog" : "Sample catalog"}</span>
+                </button>
               </div>
 
               <div className="category-list">
@@ -1854,12 +1982,23 @@ export function PosPage() {
                 )}
                 {paymentMethod === "split" && (
                   <section className="split-payment-panel">
-                    <div>
+                    <div className="split-payment-summary">
                       <strong>Split this payment</strong>
-                      <span>
-                        Balance: {money(splitBalance)} / Total selected:{" "}
-                        {money(splitTotal)}
-                      </span>
+                      <StatusPill tone={splitTone}>
+                        {splitBalanceLabel(splitBalance)}
+                      </StatusPill>
+                      <span>Total selected: {money(splitTotal)}</span>
+                    </div>
+                    <div className="split-payment-tools">
+                      <button type="button" onClick={() => fillSplitAmount("cash")}>
+                        Fill cash balance
+                      </button>
+                      <button type="button" onClick={() => fillSplitAmount("mpesa")}>
+                        Fill M-Pesa balance
+                      </button>
+                      <button type="button" onClick={() => fillSplitAmount("card")}>
+                        Fill card balance
+                      </button>
                     </div>
                     <label>
                       Cash amount
