@@ -69,6 +69,13 @@ const purchaseStatusOptions: Array<{
   { value: "cancelled", label: "Cancelled" },
 ];
 
+const purchaseFlowSteps = [
+  { key: "draft", label: "Draft" },
+  { key: "submitted", label: "Submitted" },
+  { key: "approved", label: "Approved" },
+  { key: "received", label: "Received" },
+];
+
 const emptySupplierForm = {
   name: "",
   contact_person: "",
@@ -158,6 +165,29 @@ function duplicateIdentifier(values: string[], caseSensitive = false) {
     caseSensitive ? value : value.toLowerCase(),
   );
   return new Set(normalized).size !== normalized.length;
+}
+
+function emailLooksValid(value: string) {
+  const trimmed = value.trim();
+  return !trimmed || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
+
+function phoneLooksValid(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return trimmed.replace(/\D/g, "").length >= 7;
+}
+
+function canReceiveStatus(status?: string) {
+  return status === "approved" || status === "partially_received";
+}
+
+function purchaseStageIndex(status?: string) {
+  if (status === "draft") return 0;
+  if (status === "submitted") return 1;
+  if (status === "approved" || status === "partially_received") return 2;
+  if (status === "received") return 3;
+  return -1;
 }
 
 function receiptIdentifierIssue(
@@ -261,6 +291,9 @@ export function PurchasesPage() {
     [variantOptions],
   );
   const selectedPurchaseVariant = variantById.get(purchaseForm.variant_id);
+  const selectedSupplierName = supplierById.get(purchaseForm.supplier_id);
+  const selectedBranchName =
+    branches.find((branch) => branch.id === selectedBranchId)?.name ?? "";
 
   const branchOrders = useMemo(
     () =>
@@ -321,6 +354,13 @@ export function PurchasesPage() {
   const selectedReceiptVariant = selectedReceiptItem
     ? variantById.get(selectedReceiptItem.variant_id)
     : undefined;
+  const selectedReceiptRemaining = selectedReceiptItem
+    ? Math.max(
+        0,
+        selectedReceiptItem.ordered_quantity - selectedReceiptItem.received_quantity,
+      )
+    : 0;
+  const selectedOrderCanReceive = canReceiveStatus(selectedOrder?.status);
   const receiptQuantity = Number(receiptForm.quantity);
   const receiptSerialNumbers = useMemo(
     () => splitIdentifiers(receiptForm.serial_numbers),
@@ -336,6 +376,27 @@ export function PurchasesPage() {
     receiptSerialNumbers,
     receiptImeis,
   );
+  const receiptQuantityIssue = selectedReceiptItem
+    ? !Number.isInteger(receiptQuantity) || receiptQuantity <= 0
+      ? "Enter a whole receipt quantity of at least 1."
+      : receiptQuantity > selectedReceiptRemaining
+        ? `Only ${integer(selectedReceiptRemaining)} unit(s) remain on this line.`
+        : null
+    : null;
+  const receiptBlockingIssue = receiptQuantityIssue || receiptIssue;
+  const receiptWillCompleteLine =
+    Boolean(selectedReceiptItem) &&
+    receiptQuantity > 0 &&
+    receiptQuantity === selectedReceiptRemaining;
+  const receiptRemainingAfter = selectedReceiptItem
+    ? Math.max(
+        0,
+        selectedReceiptRemaining -
+          (Number.isFinite(receiptQuantity) && receiptQuantity > 0
+            ? receiptQuantity
+            : 0),
+      )
+    : 0;
   const draftSubtotal = purchaseLines.reduce(
     (sum, line) => sum + line.orderedQuantity * line.unitCost,
     0,
@@ -345,6 +406,58 @@ export function PurchasesPage() {
       sum + lineTotal(line.orderedQuantity, line.unitCost, line.taxRate),
     0,
   );
+  const draftUnits = purchaseLines.reduce(
+    (sum, line) => sum + line.orderedQuantity,
+    0,
+  );
+  const purchaseFormQuantity = Number(purchaseForm.ordered_quantity);
+  const purchaseFormUnitCost = Number(purchaseForm.unit_cost);
+  const purchaseFormTaxRate = Number(purchaseForm.tax_rate || 0);
+  const currentLinePreview =
+    selectedPurchaseVariant &&
+    Number.isInteger(purchaseFormQuantity) &&
+    purchaseFormQuantity > 0 &&
+    Number.isFinite(purchaseFormUnitCost) &&
+    purchaseFormUnitCost > 0 &&
+    Number.isFinite(purchaseFormTaxRate) &&
+    purchaseFormTaxRate >= 0 &&
+    purchaseFormTaxRate <= 100
+      ? {
+          subtotal: purchaseFormQuantity * purchaseFormUnitCost,
+          total: lineTotal(
+            purchaseFormQuantity,
+            purchaseFormUnitCost,
+            purchaseFormTaxRate,
+          ),
+          units: purchaseFormQuantity,
+        }
+      : null;
+  const activeDraftLineCount =
+    purchaseLines.length || (currentLinePreview ? 1 : 0);
+  const activeDraftUnits =
+    purchaseLines.length > 0 ? draftUnits : currentLinePreview?.units ?? 0;
+  const activeDraftSubtotal =
+    purchaseLines.length > 0 ? draftSubtotal : currentLinePreview?.subtotal ?? 0;
+  const activeDraftTotal =
+    purchaseLines.length > 0 ? draftTotal : currentLinePreview?.total ?? 0;
+  const activeDraftTax = Math.max(0, activeDraftTotal - activeDraftSubtotal);
+  const selectedVariantAlreadyInDraft = purchaseLines.some(
+    (line) => line.variantId === purchaseForm.variant_id,
+  );
+  const canCreatePurchaseOrder = Boolean(
+    selectedBranchId &&
+      purchaseForm.supplier_id &&
+      (purchaseLines.length > 0 || currentLinePreview),
+  );
+  const supplierNameAlreadyExists =
+    Boolean(supplierForm.name.trim()) &&
+    suppliers.some(
+      (supplier) =>
+        supplier.name.trim().toLowerCase() ===
+        supplierForm.name.trim().toLowerCase(),
+    );
+  const supplierPhoneIsValid = phoneLooksValid(supplierForm.phone);
+  const supplierEmailIsValid = emailLooksValid(supplierForm.email);
 
   const totalOrdered = branchOrders.reduce(
     (sum, order) => sum + Number(order.total_amount),
@@ -538,8 +651,35 @@ export function PurchasesPage() {
 
   async function handleCreateSupplier(event: FormEvent) {
     event.preventDefault();
-    if (!supplierForm.name.trim()) {
+    const supplierName = supplierForm.name.trim();
+    const contactPerson = supplierForm.contact_person.trim();
+    const phone = supplierForm.phone.trim();
+    const email = supplierForm.email.trim();
+    const termsDays = Number(supplierForm.payment_terms_days || 0);
+
+    if (!supplierName) {
       setNotice("Supplier name is required.");
+      return;
+    }
+    if (
+      suppliers.some(
+        (supplier) =>
+          supplier.name.trim().toLowerCase() === supplierName.toLowerCase(),
+      )
+    ) {
+      setNotice("That supplier already exists. Select them from the list instead.");
+      return;
+    }
+    if (!phoneLooksValid(phone)) {
+      setNotice("Supplier phone should have at least 7 digits, or be left blank.");
+      return;
+    }
+    if (!emailLooksValid(email)) {
+      setNotice("Enter a valid supplier email, or leave it blank.");
+      return;
+    }
+    if (!Number.isFinite(termsDays) || termsDays < 0) {
+      setNotice("Payment terms must be zero or more days.");
       return;
     }
 
@@ -551,11 +691,11 @@ export function PurchasesPage() {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           is_deleted: false,
-          name: supplierForm.name.trim(),
-          contact_person: supplierForm.contact_person || null,
-          phone: supplierForm.phone || null,
-          email: supplierForm.email || null,
-          payment_terms_days: Number(supplierForm.payment_terms_days) || 0,
+          name: supplierName,
+          contact_person: contactPerson || null,
+          phone: phone || null,
+          email: email || null,
+          payment_terms_days: termsDays,
           is_active: true,
         };
         setSuppliers((current) => [supplier, ...current]);
@@ -566,11 +706,11 @@ export function PurchasesPage() {
       }
 
       const supplier = await createSupplier(token, {
-        name: supplierForm.name.trim(),
-        contact_person: supplierForm.contact_person || null,
-        phone: supplierForm.phone || null,
-        email: supplierForm.email || null,
-        payment_terms_days: Number(supplierForm.payment_terms_days) || 0,
+        name: supplierName,
+        contact_person: contactPerson || null,
+        phone: phone || null,
+        email: email || null,
+        payment_terms_days: termsDays,
       });
       setSuppliers((current) => [supplier, ...current]);
       setPurchaseForm((current) => ({ ...current, supplier_id: supplier.id }));
@@ -592,13 +732,17 @@ export function PurchasesPage() {
     if (!purchaseForm.variant_id || !selectedVariant) {
       return { error: "Select a product variant for this purchase order." };
     }
-    if (!orderedQuantity || orderedQuantity <= 0) {
-      return { error: "Quantity must be at least 1." };
+    if (
+      !Number.isFinite(orderedQuantity) ||
+      !Number.isInteger(orderedQuantity) ||
+      orderedQuantity <= 0
+    ) {
+      return { error: "Quantity must be a whole number of at least 1." };
     }
-    if (Number.isNaN(unitCost) || unitCost < 0) {
-      return { error: "Unit cost must be a valid number." };
+    if (!Number.isFinite(unitCost) || unitCost <= 0) {
+      return { error: "Unit cost must be greater than 0." };
     }
-    if (Number.isNaN(taxRate) || taxRate < 0 || taxRate > 100) {
+    if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
       return { error: "Tax rate must be between 0 and 100." };
     }
 
@@ -812,6 +956,10 @@ export function PurchasesPage() {
       setNotice("Select a purchase order first.");
       return;
     }
+    if (!canReceiveStatus(selectedOrder.status)) {
+      setNotice("Only approved or partially received purchase orders can receive stock.");
+      return;
+    }
 
     const selectedItem = receivableItems.find(
       (item) => item.id === receiptForm.purchase_order_item_id,
@@ -823,12 +971,17 @@ export function PurchasesPage() {
       return;
     }
     const remaining = selectedItem.ordered_quantity - selectedItem.received_quantity;
-    if (!quantity || quantity <= 0 || quantity > remaining) {
+    if (
+      !Number.isFinite(quantity) ||
+      !Number.isInteger(quantity) ||
+      quantity <= 0 ||
+      quantity > remaining
+    ) {
       setNotice(`Receipt quantity must be between 1 and ${remaining}.`);
       return;
     }
-    if (receiptIssue) {
-      setNotice(receiptIssue);
+    if (receiptBlockingIssue) {
+      setNotice(receiptBlockingIssue);
       return;
     }
 
@@ -1080,7 +1233,7 @@ export function PurchasesPage() {
                   setPurchaseForm((current) => ({
                     ...current,
                     variant_id: event.target.value,
-                    unit_cost: current.unit_cost || estimateUnitCost(nextVariant),
+                    unit_cost: estimateUnitCost(nextVariant),
                   }));
                 }}
               >
@@ -1137,6 +1290,52 @@ export function PurchasesPage() {
                   }
                 />
               </label>
+            </div>
+
+            <div className="purchase-item-preview">
+              <div>
+                <span>Current item</span>
+                <strong>
+                  {selectedPurchaseVariant
+                    ? selectedPurchaseVariant.label
+                    : "Select a product variant"}
+                </strong>
+                <small>
+                  {selectedPurchaseVariant
+                    ? `${selectedPurchaseVariant.sku} · ${titleize(
+                        selectedPurchaseVariant.trackingType,
+                      )} tracking`
+                    : "Search by product name, SKU, or category to narrow the list."}
+                </small>
+              </div>
+              <div>
+                <span>Line estimate</span>
+                <strong>
+                  {currentLinePreview ? money(currentLinePreview.total) : "-"}
+                </strong>
+                <small>
+                  {currentLinePreview
+                    ? `${integer(currentLinePreview.units)} unit(s) at ${money(
+                        purchaseFormUnitCost,
+                      )}`
+                    : "Enter quantity and unit cost to preview value."}
+                </small>
+              </div>
+              <StatusPill
+                tone={
+                  selectedVariantAlreadyInDraft
+                    ? "warning"
+                    : selectedPurchaseVariant
+                      ? "info"
+                      : "neutral"
+                }
+              >
+                {selectedVariantAlreadyInDraft
+                  ? "Already in draft"
+                  : selectedPurchaseVariant
+                    ? "Ready line"
+                    : "Waiting"}
+              </StatusPill>
             </div>
 
             <div className="purchase-line-builder">
@@ -1222,6 +1421,37 @@ export function PurchasesPage() {
               </p>
             )}
 
+            <div className="purchase-readiness-grid">
+              <article>
+                <span>Supplier</span>
+                <strong>{selectedSupplierName ?? "Not selected"}</strong>
+                <small>
+                  {purchaseForm.supplier_reference
+                    ? `Reference ${purchaseForm.supplier_reference}`
+                    : "Add supplier invoice or quote number if available."}
+                </small>
+              </article>
+              <article>
+                <span>Branch</span>
+                <strong>{selectedBranchName || "Not selected"}</strong>
+                <small>
+                  {purchaseForm.expected_at
+                    ? `Expected ${dateLabel(optionalDateTime(purchaseForm.expected_at))}`
+                    : "Expected date can be added later."}
+                </small>
+              </article>
+              <article>
+                <span>Draft lines</span>
+                <strong>{integer(activeDraftLineCount)}</strong>
+                <small>{integer(activeDraftUnits)} unit(s) prepared</small>
+              </article>
+              <article>
+                <span>Estimated value</span>
+                <strong>{money(activeDraftTotal)}</strong>
+                <small>Tax portion {money(activeDraftTax)}</small>
+              </article>
+            </div>
+
             <label>
               Notes
               <textarea
@@ -1237,7 +1467,17 @@ export function PurchasesPage() {
             </label>
 
             <div className="form-footer">
-              <button className="primary-button" disabled={busy}>
+              {purchaseLines.length > 0 && (
+                <button
+                  className="secondary-button"
+                  type="button"
+                  disabled={busy}
+                  onClick={() => setPurchaseLines([])}
+                >
+                  Clear Draft
+                </button>
+              )}
+              <button className="primary-button" disabled={busy || !canCreatePurchaseOrder}>
                 Create Purchase Order
               </button>
             </div>
@@ -1257,6 +1497,11 @@ export function PurchasesPage() {
                     }))
                   }
                 />
+                {supplierNameAlreadyExists && (
+                  <span className="purchase-field-warning">
+                    This supplier already exists in the list.
+                  </span>
+                )}
               </label>
               <label>
                 Contact person
@@ -1281,6 +1526,11 @@ export function PurchasesPage() {
                     }))
                   }
                 />
+                {!supplierPhoneIsValid && (
+                  <span className="purchase-field-warning">
+                    Use at least 7 digits, or leave phone blank.
+                  </span>
+                )}
               </label>
               <label>
                 Email
@@ -1293,6 +1543,11 @@ export function PurchasesPage() {
                     }))
                   }
                 />
+                {!supplierEmailIsValid && (
+                  <span className="purchase-field-warning">
+                    Enter a valid email, or leave it blank.
+                  </span>
+                )}
               </label>
             </div>
             <div className="form-grid form-grid--two">
@@ -1311,7 +1566,16 @@ export function PurchasesPage() {
                 />
               </label>
               <div className="form-footer form-footer--align-end">
-                <button className="secondary-button" disabled={busy}>
+                <button
+                  className="secondary-button"
+                  disabled={
+                    busy ||
+                    !supplierForm.name.trim() ||
+                    supplierNameAlreadyExists ||
+                    !supplierPhoneIsValid ||
+                    !supplierEmailIsValid
+                  }
+                >
                   Add Supplier
                 </button>
               </div>
@@ -1362,6 +1626,31 @@ export function PurchasesPage() {
                   </div>
                 </div>
 
+                <div className="purchase-stage-strip">
+                  {purchaseFlowSteps.map((step, index) => {
+                    const stageIndex = purchaseStageIndex(selectedOrder.status);
+                    const isCurrent =
+                      selectedOrder.status === step.key ||
+                      (selectedOrder.status === "partially_received" &&
+                        step.key === "approved");
+                    const isDone = stageIndex > index;
+                    return (
+                      <span
+                        key={step.key}
+                        className={[
+                          "purchase-stage-strip__step",
+                          isDone ? "is-done" : "",
+                          isCurrent ? "is-current" : "",
+                        ]
+                          .filter(Boolean)
+                          .join(" ")}
+                      >
+                        {index + 1}. {step.label}
+                      </span>
+                    );
+                  })}
+                </div>
+
                 <div className="action-form">
                   <label>Approval flow</label>
                   <div className="table-actions">
@@ -1382,6 +1671,10 @@ export function PurchasesPage() {
                       Approve
                     </button>
                   </div>
+                  <p className="purchase-action-note">
+                    Stock receiving unlocks after approval. Draft orders stay out
+                    of inventory until a receipt is posted.
+                  </p>
                 </div>
 
                 <div className="purchase-line-progress">
@@ -1455,6 +1748,27 @@ export function PurchasesPage() {
                     </select>
                   </label>
 
+                  <div
+                    className={`receipt-readiness-card ${
+                      selectedOrderCanReceive ? "is-ready" : "is-blocked"
+                    }`}
+                  >
+                    <strong>
+                      {receivableItems.length === 0
+                        ? "All lines received"
+                        : selectedOrderCanReceive
+                          ? "Ready to receive stock"
+                          : "Approval needed before receiving"}
+                    </strong>
+                    <span>
+                      {receivableItems.length === 0
+                        ? "This purchase order no longer has pending quantities."
+                        : selectedOrderCanReceive
+                          ? "Confirm quantity and identifiers, then post the receipt."
+                          : "Submit and approve this purchase order before stock can enter inventory."}
+                    </span>
+                  </div>
+
                   {selectedReceiptItem && (
                     <div className="receipt-tracking-card">
                       <div>
@@ -1478,6 +1792,14 @@ export function PurchasesPage() {
                             selectedReceiptItem.ordered_quantity -
                               selectedReceiptItem.received_quantity,
                           )}
+                        </strong>
+                      </div>
+                      <div>
+                        <span>After receipt</span>
+                        <strong>
+                          {receiptWillCompleteLine
+                            ? "Complete"
+                            : `${integer(receiptRemainingAfter)} left`}
                         </strong>
                       </div>
                       <button
@@ -1621,9 +1943,9 @@ export function PurchasesPage() {
                     </div>
                     )}
 
-                  {receiptIssue && (
+                  {receiptBlockingIssue && (
                     <div className="notice receipt-inline-notice">
-                      {receiptIssue}
+                      {receiptBlockingIssue}
                     </div>
                   )}
 
@@ -1644,12 +1966,12 @@ export function PurchasesPage() {
                     className="primary-button"
                     disabled={
                       busy ||
-                      Boolean(receiptIssue) ||
+                      Boolean(receiptBlockingIssue) ||
                       !selectedReceiptItem ||
-                      !["approved", "partially_received"].includes(selectedOrder.status)
+                      !selectedOrderCanReceive
                     }
                   >
-                    Receive Stock
+                    {receiptWillCompleteLine ? "Receive & Complete Line" : "Receive Stock"}
                   </button>
                 </form>
 
