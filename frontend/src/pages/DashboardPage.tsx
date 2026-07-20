@@ -4,12 +4,13 @@ import {
   ApiError,
   currentTillSession,
   dashboardSummary,
+  expenseSummary,
   inventorySummary,
   repairSummary,
   salesSummary,
 } from "../api/client";
 import type { CurrentUser, DashboardSummary, StatusTone, TillSession } from "../api/types";
-import type { AppView } from "../components/AppShell";
+import { canAccessView, type AppView } from "../components/AppShell";
 import { StatusPill } from "../components/StatusPill";
 import { demoDashboard } from "../data/demoManagement";
 import { useAuth } from "../state/auth";
@@ -35,7 +36,8 @@ type Action = {
 type ReportResult =
   | { key: "sales"; data: DashboardSummary["sales"] }
   | { key: "inventory"; data: DashboardSummary["inventory"] }
-  | { key: "repairs"; data: DashboardSummary["repairs"] };
+  | { key: "repairs"; data: DashboardSummary["repairs"] }
+  | { key: "expenses"; data: DashboardSummary["expenses"] };
 
 const emptySummary: DashboardSummary = {
   sales: {
@@ -90,8 +92,22 @@ function hasAny(user: CurrentUser | null, permissions: string[]) {
   );
 }
 
+function hasAll(user: CurrentUser | null, permissions: string[]) {
+  return permissions.every((permission) =>
+    Boolean(user?.permissions.includes(permission) || user?.permissions.includes("*")),
+  );
+}
+
 function canLoadFull(user: CurrentUser | null) {
-  return roleIs(user, "admin", "branch_manager") || hasAny(user, ["reports.dashboard.view"]);
+  return (
+    roleIs(user, "admin", "branch_manager") ||
+    hasAll(user, [
+      "reports.sales.view",
+      "reports.inventory.view",
+      "reports.repairs.view",
+      "expenses.view",
+    ])
+  );
 }
 
 function canLoadSales(user: CurrentUser | null) {
@@ -110,6 +126,10 @@ function canLoadRepairs(user: CurrentUser | null) {
     roleIs(user, "admin", "branch_manager", "technician") ||
     hasAny(user, ["reports.repairs.view", "repairs.view", "repairs.assigned.view"])
   );
+}
+
+function canLoadExpenses(user: CurrentUser | null) {
+  return roleIs(user, "admin", "branch_manager", "accountant") || hasAny(user, ["expenses.view"]);
 }
 
 function canLoadTill(user: CurrentUser | null) {
@@ -157,6 +177,16 @@ function roleProfile(user: CurrentUser | null) {
       view: "pos" as AppView,
     };
   }
+  if (roleIs(user, "accountant")) {
+    return {
+      eyebrow: "Finance review",
+      title: "Reports and expense desk",
+      description:
+        "Review sales, expense movement, stock valuation, and repair revenue without touching operational workflows.",
+      action: "Open Reports",
+      view: "reports" as AppView,
+    };
+  }
   return {
     eyebrow: "Owner workspace",
     title: "Business dashboard",
@@ -202,6 +232,14 @@ function metricsFor(
       { label: "Stock records", value: integer(summary.inventory.stock_balance_count), tone: "neutral", caption: "Tracked balances" },
     ];
   }
+  if (roleIs(user, "accountant")) {
+    return [
+      { label: "Net sales", value: money(summary.sales.net_sales), tone: "success", caption: `${integer(summary.sales.sale_count)} receipts` },
+      { label: "Approved expenses", value: money(summary.expenses.total_approved_expenses), tone: "warning", caption: `${integer(summary.expenses.approved_expense_count)} records` },
+      { label: "Pending expenses", value: integer(summary.expenses.pending_expense_count), tone: summary.expenses.pending_expense_count ? "warning" : "success", caption: "Awaiting manager action" },
+      { label: "Repair payments", value: money(summary.repairs.payment_total), tone: "info", caption: "Collected repair income" },
+    ];
+  }
   return [
     { label: "Net sales", value: money(summary.sales.net_sales), tone: "success", caption: `${integer(summary.sales.sale_count)} receipts` },
     { label: "Stock value", value: money(summary.inventory.stock_value), tone: "info", caption: `${integer(summary.inventory.total_available)} available` },
@@ -230,6 +268,13 @@ function focusFor(user: CurrentUser | null, summary: DashboardSummary) {
       ["Review low stock", `${integer(summary.inventory.low_stock_count)} item(s) are below reorder level.`, summary.inventory.low_stock_count ? "danger" : "success"],
       ["Receive pending stock", "Purchase order receipts should update stock immediately.", "info"],
       ["Keep counts moving", "Counts and transfers explain branch quantity differences.", "neutral"],
+    ] as const;
+  }
+  if (roleIs(user, "accountant")) {
+    return [
+      ["Reconcile daily figures", `${money(summary.sales.net_sales)} net sales against ${money(summary.expenses.total_approved_expenses)} approved expenses.`, "info"],
+      ["Watch pending expenses", `${integer(summary.expenses.pending_expense_count)} expense(s) still need review by a manager.`, summary.expenses.pending_expense_count ? "warning" : "success"],
+      ["Review category spend", `${integer(summary.expenses.by_category.length)} expense category group(s) have approved spending.`, "neutral"],
     ] as const;
   }
   return [
@@ -262,6 +307,12 @@ function actionsFor(user: CurrentUser | null): Action[] {
       { label: "Purchases", description: "Create or receive POs", view: "purchases" },
       { label: "Catalog", description: "View item setup", view: "catalog" },
       { label: "Reports", description: "Inventory summaries", view: "reports" },
+    ];
+  }
+  if (roleIs(user, "accountant")) {
+    return [
+      { label: "Reports", description: "Sales, stock, repair, and expense summaries", view: "reports" },
+      { label: "Expenses", description: "Review submitted spending records", view: "expenses" },
     ];
   }
   return [
@@ -335,6 +386,10 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
           attempts += 1;
           reports.push(repairSummary(authToken).then((data) => ({ key: "repairs", data })));
         }
+        if (canLoadExpenses(user)) {
+          attempts += 1;
+          reports.push(expenseSummary(authToken).then((data) => ({ key: "expenses", data })));
+        }
 
         const results = await Promise.allSettled(reports);
         results.forEach((result) => {
@@ -382,11 +437,15 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const profile = useMemo(() => roleProfile(user), [user]);
   const metrics = useMemo(() => metricsFor(user, summary, tillSession), [summary, tillSession, user]);
   const focus = useMemo(() => focusFor(user, summary), [summary, user]);
-  const actions = useMemo(() => actionsFor(user), [user]);
+  const actions = useMemo(
+    () => actionsFor(user).filter((action) => canAccessView(user, action.view)),
+    [user],
+  );
 
   const showSales = canLoadSales(user) || loaded.sales;
   const showInventory = canLoadInventory(user) || loaded.inventory;
   const showRepairs = canLoadRepairs(user) || loaded.repairs;
+  const showExpenses = canLoadExpenses(user) || loaded.expenses;
 
   return (
     <section className="dashboard-page module-page">
@@ -524,6 +583,32 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
                 )}
               </tbody>
             </table>
+          </section>
+        )}
+
+        {showExpenses && (
+          <section className="panel-card">
+            <header className="panel-card__header">
+              <div>
+                <p className="eyebrow">Expenses</p>
+                <h2>Approved spend by category</h2>
+              </div>
+            </header>
+            <div className="activity-list">
+              {summary.expenses.by_category.length ? (
+                summary.expenses.by_category.map((item) => (
+                  <div className="activity-row" key={item.category_name}>
+                    <span>{money(item.amount)}</span>
+                    <div>
+                      <strong>{item.category_name}</strong>
+                      <small>{integer(item.expense_count)} expense record(s)</small>
+                    </div>
+                  </div>
+                ))
+              ) : (
+                <div className="empty-panel-message">No expense report loaded for this account yet.</div>
+              )}
+            </div>
           </section>
         )}
       </div>

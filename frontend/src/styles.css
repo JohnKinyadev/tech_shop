@@ -4,6 +4,7 @@
   --app-bg: #e4ebf2;
   --panel: #ffffff;
   --panel-soft: #f6f9fc;
+  --hero-soft: #f3f8fd;
   --line: #d8e1e8;
   --line-strong: #bfcedd;
   --text: #213242;
@@ -27,6 +28,7 @@
   --app-bg: #e7efe9;
   --panel: #ffffff;
   --panel-soft: #f5faf7;
+  --hero-soft: #eef8f1;
   --line: #d5e2d9;
   --line-strong: #b8cdbc;
   --text: #1f352a;
@@ -524,7 +526,7 @@ button:disabled {
   padding: 16px;
   border: 1px solid var(--line);
   border-radius: var(--radius);
-  background: linear-gradient(135deg, #ffffff 0%, #f3f8fd 100%);
+  background: linear-gradient(135deg, #ffffff 0%, var(--hero-soft) 100%);
   box-shadow: var(--shadow);
 }
 
