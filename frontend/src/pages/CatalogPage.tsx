@@ -148,6 +148,50 @@ function splitIdentifiers(value: string) {
     .filter(Boolean);
 }
 
+function duplicateValues(values: string[]) {
+  const seen = new Set<string>();
+  const duplicates = new Set<string>();
+  values.forEach((value) => {
+    const normalized = value.toLowerCase();
+    if (seen.has(normalized)) {
+      duplicates.add(value);
+      return;
+    }
+    seen.add(normalized);
+  });
+  return Array.from(duplicates);
+}
+
+function skuExists(products: CatalogProduct[], sku: string, exceptVariantId?: string) {
+  const normalized = sku.trim().toUpperCase();
+  if (!normalized) return false;
+  return products.some((product) =>
+    product.variants.some(
+      (variant) =>
+        variant.id !== exceptVariantId && variant.sku.trim().toUpperCase() === normalized,
+    ),
+  );
+}
+
+function isHttpUrl(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  try {
+    const url = new URL(trimmed);
+    return url.protocol === "http:" || url.protocol === "https:";
+  } catch {
+    return false;
+  }
+}
+
+function priceNumber(value: string) {
+  return Number(value) || 0;
+}
+
+function priceMargin(cost: string, selling: string) {
+  return priceNumber(selling) - priceNumber(cost);
+}
+
 function categoryKind(category?: Category): ItemKind {
   const text = `${category?.name ?? ""} ${category?.slug ?? ""}`.toLowerCase();
   if (text.includes("phone")) return "phone";
@@ -283,6 +327,16 @@ function buildAttributes(form: ItemForm, kind: ItemKind) {
   );
 }
 
+function emptyTableRow(colSpan: number, message: string) {
+  return (
+    <tr>
+      <td className="empty-table-cell" colSpan={colSpan}>
+        {message}
+      </td>
+    </tr>
+  );
+}
+
 export function CatalogPage() {
   const { token, isPreview } = useAuth();
   const [query, setQuery] = useState("");
@@ -399,6 +453,23 @@ export function CatalogPage() {
     }),
     [products],
   );
+  const draftProductName = buildItemName(itemForm, selectedBrandName);
+  const draftOptionName = buildOptionName(itemForm, selectedKind);
+  const draftSku = buildSku(itemForm, selectedBrandName, selectedKind);
+  const draftAttributes = buildAttributes(itemForm, selectedKind);
+  const draftAttributeEntries = Object.entries(draftAttributes).filter(
+    ([, value]) => value !== "",
+  );
+  const draftImeiNumbers = splitIdentifiers(itemForm.imei_numbers);
+  const draftSerialNumbers = splitIdentifiers(itemForm.serial_numbers);
+  const draftDuplicateImeis = duplicateValues(draftImeiNumbers);
+  const draftDuplicateSerials = duplicateValues(draftSerialNumbers);
+  const draftMargin = priceMargin(itemForm.cost_price, itemForm.selling_price);
+  const draftSellingPrice = priceNumber(itemForm.selling_price);
+  const draftMinimumPrice = priceNumber(itemForm.minimum_selling_price);
+  const draftImageUrl = itemForm.image_url.trim();
+  const draftImageIsValid = isHttpUrl(draftImageUrl);
+  const draftSkuAlreadyExists = skuExists(products, draftSku);
 
   async function reloadProducts(preferredProductId?: string) {
     if (!token || isPreview) return;
@@ -619,8 +690,57 @@ export function CatalogPage() {
       setNotice("Phone type/model is required. Example: A15.");
       return;
     }
+    if (selectedKind === "phone" && itemForm.tracking_type !== "imei") {
+      setNotice("Phones should use IMEI tracking so each device can be traced for warranty.");
+      return;
+    }
+    if (selectedKind === "laptop" && !itemForm.model_type.trim()) {
+      setNotice("Laptop model/type is required. Example: T480 or EliteBook 840 G5.");
+      return;
+    }
+    if (selectedKind === "laptop" && itemForm.tracking_type === "bulk") {
+      setNotice("Laptops should use serial number tracking so each unit can be traced.");
+      return;
+    }
+    if (
+      ["accessory", "repair_part", "general"].includes(selectedKind) &&
+      !itemForm.item_name.trim() &&
+      !itemForm.model_type.trim()
+    ) {
+      setNotice("Enter the item name or type/compatibility before adding it.");
+      return;
+    }
     if (!sku) {
       setNotice("SKU could not be generated. Enter one manually.");
+      return;
+    }
+    if (skuExists(products, sku)) {
+      setNotice(`SKU ${sku} already exists. Use a unique SKU for this item option.`);
+      return;
+    }
+    if (Number(itemForm.selling_price) <= 0) {
+      setNotice("Selling price must be greater than zero before the item can be sold.");
+      return;
+    }
+    if (
+      itemForm.minimum_selling_price.trim() &&
+      Number(itemForm.minimum_selling_price) > Number(itemForm.selling_price)
+    ) {
+      setNotice("Minimum selling price cannot be higher than the selling price.");
+      return;
+    }
+    if (!isHttpUrl(itemForm.image_url)) {
+      setNotice("Image URL must start with http:// or https://.");
+      return;
+    }
+    const duplicateImeis = duplicateValues(splitIdentifiers(itemForm.imei_numbers));
+    if (duplicateImeis.length) {
+      setNotice(`Duplicate IMEI entered: ${duplicateImeis[0]}.`);
+      return;
+    }
+    const duplicateSerials = duplicateValues(splitIdentifiers(itemForm.serial_numbers));
+    if (duplicateSerials.length) {
+      setNotice(`Duplicate serial number entered: ${duplicateSerials[0]}.`);
       return;
     }
 
@@ -827,6 +947,21 @@ export function CatalogPage() {
       setNotice("Option name and SKU are required.");
       return;
     }
+    if (skuExists(products, variantForm.sku)) {
+      setNotice(`SKU ${variantForm.sku.trim().toUpperCase()} already exists. Use a unique SKU.`);
+      return;
+    }
+    if (Number(variantForm.selling_price) <= 0) {
+      setNotice("Selling price must be greater than zero for the new option/SKU.");
+      return;
+    }
+    if (
+      variantForm.minimum_selling_price.trim() &&
+      Number(variantForm.minimum_selling_price) > Number(variantForm.selling_price)
+    ) {
+      setNotice("Minimum selling price cannot be higher than the selling price.");
+      return;
+    }
 
     setBusy(true);
     try {
@@ -880,6 +1015,14 @@ export function CatalogPage() {
       setNotice("Select an option/SKU before editing price.");
       return;
     }
+    if (!priceForm.name.trim()) {
+      setNotice("Option/SKU name is required.");
+      return;
+    }
+    if (Number(priceForm.selling_price) <= 0) {
+      setNotice("Selling price must be greater than zero.");
+      return;
+    }
 
     setBusy(true);
     try {
@@ -927,6 +1070,10 @@ export function CatalogPage() {
     }
     if (!imageForm.url.trim()) {
       setNotice("Image URL is required.");
+      return;
+    }
+    if (!isHttpUrl(imageForm.url)) {
+      setNotice("Image URL must start with http:// or https://.");
       return;
     }
 
@@ -1527,6 +1674,101 @@ export function CatalogPage() {
               </div>
             </div>
 
+            <div className="catalog-draft-preview">
+              <div className="catalog-draft-preview__header">
+                <div>
+                  <strong>Item preview</strong>
+                  <span>This is what the system will create from the form.</span>
+                </div>
+                <StatusPill tone={draftSkuAlreadyExists ? "danger" : "success"}>
+                  {draftSkuAlreadyExists ? "SKU exists" : "SKU ready"}
+                </StatusPill>
+              </div>
+
+              <div className="catalog-draft-preview__grid">
+                <div>
+                  <span>Item name</span>
+                  <strong>{draftProductName}</strong>
+                </div>
+                <div>
+                  <span>Option/SKU name</span>
+                  <strong>{draftOptionName}</strong>
+                </div>
+                <div>
+                  <span>Generated SKU</span>
+                  <strong>{draftSku || "Enter more details"}</strong>
+                </div>
+                <div>
+                  <span>Tracking</span>
+                  <strong>{titleize(itemForm.tracking_type)}</strong>
+                </div>
+                <div>
+                  <span>Selling price</span>
+                  <strong>{money(itemForm.selling_price || "0")}</strong>
+                </div>
+                <div>
+                  <span>Approx. margin</span>
+                  <strong>{money(draftMargin)}</strong>
+                </div>
+              </div>
+
+              <div className="catalog-draft-preview__checks">
+                <StatusPill tone={draftSellingPrice > 0 ? "success" : "danger"}>
+                  {draftSellingPrice > 0 ? "Price set" : "Needs price"}
+                </StatusPill>
+                <StatusPill
+                  tone={
+                    !itemForm.minimum_selling_price.trim() ||
+                    draftMinimumPrice <= draftSellingPrice
+                      ? "success"
+                      : "danger"
+                  }
+                >
+                  Min price
+                </StatusPill>
+                <StatusPill tone={draftImageIsValid ? "info" : "danger"}>
+                  {draftImageUrl ? "Image URL" : "No image yet"}
+                </StatusPill>
+                {(draftImeiNumbers.length > 0 || draftSerialNumbers.length > 0) && (
+                  <StatusPill
+                    tone={
+                      draftDuplicateImeis.length || draftDuplicateSerials.length
+                        ? "danger"
+                        : "success"
+                    }
+                  >
+                    Identifiers
+                  </StatusPill>
+                )}
+              </div>
+
+              <div className="catalog-draft-preview__media">
+                {draftImageUrl && draftImageIsValid ? (
+                  <img
+                    src={draftImageUrl}
+                    alt={itemForm.image_alt_text.trim() || draftProductName}
+                  />
+                ) : (
+                  <span>
+                    {draftImageUrl
+                      ? "Image URL needs http:// or https://"
+                      : "Add an image URL if this item should appear with a photo."}
+                  </span>
+                )}
+              </div>
+
+              {draftAttributeEntries.length > 0 && (
+                <div className="catalog-draft-preview__attributes">
+                  {draftAttributeEntries.slice(0, 8).map(([key, value]) => (
+                    <span key={key}>
+                      <b>{titleize(key)}</b>
+                      {String(value)}
+                    </span>
+                  ))}
+                </div>
+              )}
+            </div>
+
             {(selectedKind === "phone" || selectedKind === "laptop") && (
               <div className="identifier-panel">
                 <div>
@@ -2057,31 +2299,33 @@ export function CatalogPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredProducts.map((product) => (
-                <tr
-                  key={product.id}
-                  className={selectedProduct?.id === product.id ? "is-selected" : ""}
-                  onClick={() => {
-                    setSelectedProductId(product.id);
-                    setSelectedVariantId(product.variants[0]?.id ?? "");
-                  }}
-                >
-                  <td>{product.name}</td>
-                  <td>{categoryById.get(product.category_id ?? "") ?? "-"}</td>
-                  <td>{brandById.get(product.brand_id ?? "") ?? "-"}</td>
-                  <td>{integer(product.variants.length)}</td>
-                  <td>
-                    <div className="table-actions">
-                      <StatusPill tone={toneForStatus(product.is_active)}>
-                        {product.is_active ? "Available" : "Inactive"}
-                      </StatusPill>
-                      <StatusPill tone={toneForStatus(product.is_published)}>
-                        {product.is_published ? "Website" : "Internal"}
-                      </StatusPill>
-                    </div>
-                  </td>
-                </tr>
-              ))}
+              {filteredProducts.length
+                ? filteredProducts.map((product) => (
+                    <tr
+                      key={product.id}
+                      className={selectedProduct?.id === product.id ? "is-selected" : ""}
+                      onClick={() => {
+                        setSelectedProductId(product.id);
+                        setSelectedVariantId(product.variants[0]?.id ?? "");
+                      }}
+                    >
+                      <td>{product.name}</td>
+                      <td>{categoryById.get(product.category_id ?? "") ?? "-"}</td>
+                      <td>{brandById.get(product.brand_id ?? "") ?? "-"}</td>
+                      <td>{integer(product.variants.length)}</td>
+                      <td>
+                        <div className="table-actions">
+                          <StatusPill tone={toneForStatus(product.is_active)}>
+                            {product.is_active ? "Available" : "Inactive"}
+                          </StatusPill>
+                          <StatusPill tone={toneForStatus(product.is_published)}>
+                            {product.is_published ? "Website" : "Internal"}
+                          </StatusPill>
+                        </div>
+                      </td>
+                    </tr>
+                  ))
+                : emptyTableRow(5, "No catalog items match the current filters.")}
             </tbody>
           </table>
         </section>
@@ -2105,7 +2349,8 @@ export function CatalogPage() {
               </tr>
             </thead>
             <tbody>
-              {filteredVariantRows.map(({ product, variant }) => (
+              {filteredVariantRows.length
+                ? filteredVariantRows.map(({ product, variant }) => (
                   <tr
                     key={variant.id}
                     className={selectedVariant?.id === variant.id ? "is-selected" : ""}
@@ -2125,7 +2370,8 @@ export function CatalogPage() {
                       </StatusPill>
                     </td>
                   </tr>
-                ))}
+                ))
+                : emptyTableRow(6, "No SKU/options match the current filters.")}
             </tbody>
           </table>
         </section>
