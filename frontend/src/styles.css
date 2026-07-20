@@ -2005,6 +2005,63 @@ button:disabled {
   font-size: 18px;
 }
 
+.inventory-health-strip,
+.inventory-operation-preview,
+.inventory-count-summary {
+  display: grid;
+  gap: 8px;
+}
+
+.inventory-health-strip {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.inventory-operation-preview {
+  grid-template-columns: repeat(3, minmax(0, 1fr)) auto;
+  align-items: center;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.inventory-count-summary {
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+}
+
+.inventory-health-strip div,
+.inventory-operation-preview div,
+.inventory-count-summary div {
+  display: grid;
+  gap: 3px;
+  min-width: 0;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.inventory-health-strip span,
+.inventory-operation-preview span,
+.inventory-count-summary span {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 800;
+}
+
+.inventory-health-strip small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.inventory-operation-preview strong,
+.inventory-count-summary strong {
+  overflow: hidden;
+  color: var(--text);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .inventory-watchlist,
 .serialized-unit-list {
   display: grid;

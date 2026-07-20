@@ -119,6 +119,24 @@ function updateCountStatus(count: StockCount, status: string): StockCount {
   };
 }
 
+function countVarianceSummary(count?: StockCount) {
+  const items = count?.items ?? [];
+  const expected = items.reduce((sum, item) => sum + item.expected_quantity, 0);
+  const counted = items.reduce(
+    (sum, item) => sum + (item.counted_quantity ?? 0),
+    0,
+  );
+  const countedLines = items.filter((item) => item.counted_quantity !== null).length;
+  return {
+    expected,
+    counted,
+    countedLines,
+    openLines: Math.max(items.length - countedLines, 0),
+    variance: counted - expected,
+    totalLines: items.length,
+  };
+}
+
 export function InventoryPage() {
   const { token, isPreview, user } = useAuth();
   const [query, setQuery] = useState("");
@@ -242,6 +260,24 @@ export function InventoryPage() {
       .filter((movement) => movement.variant_id === selectedStockBalance.variant_id)
       .slice(0, 8);
   }, [movementScope, movements, selectedStockBalance]);
+  const adjustmentDelta = Number(adjustmentForm.quantity_delta) || 0;
+  const adjustmentProjectedOnHand =
+    selectedAdjustmentBalance !== undefined
+      ? selectedAdjustmentBalance.quantity_on_hand + adjustmentDelta
+      : null;
+  const adjustmentProjectedAvailable =
+    selectedAdjustmentBalance !== undefined
+      ? selectedAdjustmentBalance.available_quantity + adjustmentDelta
+      : null;
+  const transferQuantity = Number(transferForm.quantity) || 0;
+  const transferProjectedAvailable =
+    selectedTransferBalance !== undefined
+      ? selectedTransferBalance.available_quantity - transferQuantity
+      : null;
+  const selectedCountSummary = useMemo(
+    () => countVarianceSummary(selectedCount),
+    [selectedCount],
+  );
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -446,7 +482,10 @@ export function InventoryPage() {
   }
 
   function balanceHealthTone(balance: InventoryBalance) {
-    return balanceHealth(balance) === "healthy" ? "success" : "danger";
+    const health = balanceHealth(balance);
+    if (health === "healthy") return "success";
+    if (health === "low") return "warning";
+    return "danger";
   }
 
   function selectBalance(balance: InventoryBalance) {
@@ -516,8 +555,16 @@ export function InventoryPage() {
       setNotice("Adjustment quantity cannot be zero.");
       return;
     }
+    if (selectedAdjustmentBalance.quantity_on_hand + quantityDelta < 0) {
+      setNotice("Adjustment cannot reduce on-hand stock below zero.");
+      return;
+    }
     if (!adjustmentForm.reason.trim()) {
       setNotice("Adjustment reason is required.");
+      return;
+    }
+    if (adjustmentForm.reason.trim().length < 8) {
+      setNotice("Add a clearer adjustment reason before sending it for approval.");
       return;
     }
 
@@ -624,6 +671,10 @@ export function InventoryPage() {
       setNotice(
         `Only ${integer(selectedTransferBalance.available_quantity)} unit(s) are available to transfer.`,
       );
+      return;
+    }
+    if (!transferForm.notes.trim()) {
+      setNotice("Add a transfer note so the receiving branch understands why stock is moving.");
       return;
     }
 
@@ -857,6 +908,13 @@ export function InventoryPage() {
       setNotice("Select a stock count first.");
       return;
     }
+    const summary = countVarianceSummary(selectedCount);
+    if ((action === "submit" || action === "approve") && summary.openLines > 0) {
+      setNotice(
+        `Finish all count lines first. ${integer(summary.openLines)} line(s) still need counted quantities.`,
+      );
+      return;
+    }
 
     setBusy(true);
     try {
@@ -1029,6 +1087,31 @@ export function InventoryPage() {
                   Recent moves
                 </span>
               </div>
+              <div className="inventory-health-strip">
+                <div>
+                  <span>Reserved stock</span>
+                  <strong>{integer(selectedStockBalance.reserved_quantity)}</strong>
+                  <small>Reserved units are not available for POS or transfer.</small>
+                </div>
+                <div>
+                  <span>Reorder gap</span>
+                  <strong>
+                    {integer(
+                      Math.max(
+                        selectedStockBalance.reorder_level -
+                          selectedStockBalance.available_quantity,
+                        0,
+                      ),
+                    )}
+                  </strong>
+                  <small>
+                    {selectedStockBalance.available_quantity <=
+                    selectedStockBalance.reorder_level
+                      ? "Create a purchase order or transfer stock in."
+                      : "Current available stock is above reorder level."}
+                  </small>
+                </div>
+              </div>
             </div>
           ) : (
             <p className="empty-panel-message">
@@ -1125,6 +1208,34 @@ export function InventoryPage() {
                 </strong>
               </div>
             )}
+            {selectedAdjustmentBalance && (
+              <div className="inventory-operation-preview">
+                <div>
+                  <span>Requested change</span>
+                  <strong>{signedQuantity(adjustmentDelta)}</strong>
+                </div>
+                <div>
+                  <span>Projected on hand</span>
+                  <strong>{integer(adjustmentProjectedOnHand ?? 0)}</strong>
+                </div>
+                <div>
+                  <span>Projected available</span>
+                  <strong>{integer(adjustmentProjectedAvailable ?? 0)}</strong>
+                </div>
+                <StatusPill
+                  tone={
+                    adjustmentProjectedOnHand !== null &&
+                    adjustmentProjectedOnHand < 0
+                      ? "danger"
+                      : adjustmentDelta
+                        ? "warning"
+                        : "neutral"
+                  }
+                >
+                  Approval required
+                </StatusPill>
+              </div>
+            )}
             <div className="form-grid form-grid--two">
               <label>
                 Stock item
@@ -1187,6 +1298,40 @@ export function InventoryPage() {
                 <strong>
                   {integer(selectedTransferBalance.available_quantity)} available to move
                 </strong>
+              </div>
+            )}
+            {selectedTransferBalance && (
+              <div className="inventory-operation-preview">
+                <div>
+                  <span>Moving</span>
+                  <strong>{integer(transferQuantity)}</strong>
+                </div>
+                <div>
+                  <span>Remaining available</span>
+                  <strong>{integer(transferProjectedAvailable ?? 0)}</strong>
+                </div>
+                <div>
+                  <span>Destination</span>
+                  <strong>
+                    {transferForm.destination_branch_id
+                      ? branchName(transferForm.destination_branch_id)
+                      : "Select branch"}
+                  </strong>
+                </div>
+                <StatusPill
+                  tone={
+                    transferProjectedAvailable !== null &&
+                    transferProjectedAvailable < 0
+                      ? "danger"
+                      : transferProjectedAvailable !== null &&
+                          transferProjectedAvailable <=
+                            selectedTransferBalance.reorder_level
+                        ? "warning"
+                        : "success"
+                  }
+                >
+                  Transfer check
+                </StatusPill>
               </div>
             )}
             <div className="form-grid form-grid--two">
@@ -1328,6 +1473,28 @@ export function InventoryPage() {
                   <StatusPill tone={toneForStatus(selectedCount.status)}>
                     {titleize(selectedCount.status)}
                   </StatusPill>
+                </div>
+
+                <div className="inventory-count-summary">
+                  <div>
+                    <span>Lines counted</span>
+                    <strong>
+                      {integer(selectedCountSummary.countedLines)} /{" "}
+                      {integer(selectedCountSummary.totalLines)}
+                    </strong>
+                  </div>
+                  <div>
+                    <span>Expected</span>
+                    <strong>{integer(selectedCountSummary.expected)}</strong>
+                  </div>
+                  <div>
+                    <span>Counted</span>
+                    <strong>{integer(selectedCountSummary.counted)}</strong>
+                  </div>
+                  <div>
+                    <span>Variance</span>
+                    <strong>{signedQuantity(selectedCountSummary.variance)}</strong>
+                  </div>
                 </div>
 
                 <form className="action-form" onSubmit={handleUpdateCountItem}>
@@ -1543,43 +1710,51 @@ export function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {adjustments.map((request) => (
-                <tr key={request.id}>
-                  <td>{requestChangeSummary(request)}</td>
-                  <td>{request.reason}</td>
-                  <td>
-                    <StatusPill tone={toneForStatus(request.status)}>
-                      {titleize(request.status)}
-                    </StatusPill>
-                  </td>
-                  <td>
-                    {request.status === "pending" ? (
-                      <div className="table-actions">
-                        <button
-                          disabled={busy}
-                          onClick={() =>
-                            void handleAdjustmentDecision(request, true)
-                          }
-                          type="button"
-                        >
-                          Approve
-                        </button>
-                        <button
-                          disabled={busy}
-                          onClick={() =>
-                            void handleAdjustmentDecision(request, false)
-                          }
-                          type="button"
-                        >
-                          Reject
-                        </button>
-                      </div>
-                    ) : (
-                      request.decision_note ?? "-"
-                    )}
+              {adjustments.length ? (
+                adjustments.map((request) => (
+                  <tr key={request.id}>
+                    <td>{requestChangeSummary(request)}</td>
+                    <td>{request.reason}</td>
+                    <td>
+                      <StatusPill tone={toneForStatus(request.status)}>
+                        {titleize(request.status)}
+                      </StatusPill>
+                    </td>
+                    <td>
+                      {request.status === "pending" ? (
+                        <div className="table-actions">
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              void handleAdjustmentDecision(request, true)
+                            }
+                            type="button"
+                          >
+                            Approve
+                          </button>
+                          <button
+                            disabled={busy}
+                            onClick={() =>
+                              void handleAdjustmentDecision(request, false)
+                            }
+                            type="button"
+                          >
+                            Reject
+                          </button>
+                        </div>
+                      ) : (
+                        request.decision_note ?? "-"
+                      )}
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="empty-table-cell">
+                    No stock adjustment requests are waiting in this branch.
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </section>
@@ -1601,29 +1776,37 @@ export function InventoryPage() {
               </tr>
             </thead>
             <tbody>
-              {transfers.map((transfer) => (
-                <tr
-                  key={transfer.id}
-                  className={selectedTransfer?.id === transfer.id ? "is-selected" : ""}
-                  onClick={() => setSelectedTransferId(transfer.id)}
-                >
-                  <td>{transfer.transfer_number}</td>
-                  <td>
-                    {branchName(transfer.source_branch_id)} →{" "}
-                    {branchName(transfer.destination_branch_id)}
-                  </td>
-                  <td>
-                    {integer(
-                      transfer.items.reduce((sum, item) => sum + item.quantity, 0),
-                    )}
-                  </td>
-                  <td>
-                    <StatusPill tone={toneForStatus(transfer.status)}>
-                      {titleize(transfer.status)}
-                    </StatusPill>
+              {transfers.length ? (
+                transfers.map((transfer) => (
+                  <tr
+                    key={transfer.id}
+                    className={selectedTransfer?.id === transfer.id ? "is-selected" : ""}
+                    onClick={() => setSelectedTransferId(transfer.id)}
+                  >
+                    <td>{transfer.transfer_number}</td>
+                    <td>
+                      {branchName(transfer.source_branch_id)} →{" "}
+                      {branchName(transfer.destination_branch_id)}
+                    </td>
+                    <td>
+                      {integer(
+                        transfer.items.reduce((sum, item) => sum + item.quantity, 0),
+                      )}
+                    </td>
+                    <td>
+                      <StatusPill tone={toneForStatus(transfer.status)}>
+                        {titleize(transfer.status)}
+                      </StatusPill>
+                    </td>
+                  </tr>
+                ))
+              ) : (
+                <tr>
+                  <td colSpan={4} className="empty-table-cell">
+                    No branch transfers have been created for this branch yet.
                   </td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </section>
@@ -1643,26 +1826,41 @@ export function InventoryPage() {
                 <th>Count</th>
                 <th>Status</th>
                 <th>Lines</th>
+                <th>Variance</th>
                 <th>Submitted</th>
               </tr>
             </thead>
             <tbody>
-              {stockCounts.map((count) => (
-                <tr
-                  key={count.id}
-                  className={selectedCount?.id === count.id ? "is-selected" : ""}
-                  onClick={() => setSelectedCountId(count.id)}
-                >
-                  <td>{count.count_number}</td>
-                  <td>
-                    <StatusPill tone={toneForStatus(count.status)}>
-                      {titleize(count.status)}
-                    </StatusPill>
+              {stockCounts.length ? (
+                stockCounts.map((count) => {
+                  const summary = countVarianceSummary(count);
+                  return (
+                    <tr
+                      key={count.id}
+                      className={selectedCount?.id === count.id ? "is-selected" : ""}
+                      onClick={() => setSelectedCountId(count.id)}
+                    >
+                      <td>{count.count_number}</td>
+                      <td>
+                        <StatusPill tone={toneForStatus(count.status)}>
+                          {titleize(count.status)}
+                        </StatusPill>
+                      </td>
+                      <td>
+                        {integer(summary.countedLines)} / {integer(summary.totalLines)}
+                      </td>
+                      <td>{signedQuantity(summary.variance)}</td>
+                      <td>{dateLabel(count.submitted_at)}</td>
+                    </tr>
+                  );
+                })
+              ) : (
+                <tr>
+                  <td colSpan={5} className="empty-table-cell">
+                    No stock count sessions have been created for this branch yet.
                   </td>
-                  <td>{integer(count.items.length)}</td>
-                  <td>{dateLabel(count.submitted_at)}</td>
                 </tr>
-              ))}
+              )}
             </tbody>
           </table>
         </section>
