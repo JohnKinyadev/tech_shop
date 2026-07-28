@@ -1444,7 +1444,10 @@ button:disabled {
 .repair-next-action,
 .repair-form-hint,
 .repair-intake-helper,
-.repair-intake-summary {
+.repair-intake-summary,
+.repair-quote-preview,
+.repair-part-readiness,
+.repair-payment-readiness {
   display: grid;
   gap: 5px;
   padding: 10px;
@@ -1472,11 +1475,94 @@ button:disabled {
 .repair-alert-list span,
 .repair-form-hint span,
 .repair-intake-summary span,
+.repair-quote-preview span,
+.repair-quote-preview small,
+.repair-part-readiness span,
+.repair-part-readiness small,
+.repair-payment-readiness span,
+.repair-payment-readiness small,
+.repair-field-warning,
 .repair-selected-meta small,
 .repair-intake-helper span,
 .repair-queue-table td span {
   color: var(--muted);
   line-height: 1.45;
+}
+
+.repair-field-warning {
+  color: #9b2d24;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.repair-intake-checklist {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.repair-stage-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 7px;
+}
+
+.repair-stage-strip__step {
+  padding: 7px 9px;
+  color: var(--muted);
+  border: 1px solid var(--line);
+  border-radius: 999px;
+  background: #fff;
+  font-size: 12px;
+  font-weight: 800;
+  text-align: center;
+}
+
+.repair-stage-strip__step.is-done {
+  color: #0f6a43;
+  border-color: #bfe5d1;
+  background: #f0fbf5;
+}
+
+.repair-stage-strip__step.is-current {
+  color: var(--primary-dark);
+  border-color: #b9d8f0;
+  background: #f4f9fd;
+}
+
+.repair-quote-preview,
+.repair-part-readiness,
+.repair-payment-readiness {
+  background: #f8fbfd;
+}
+
+.repair-part-readiness,
+.repair-payment-readiness {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  align-items: center;
+}
+
+.repair-part-readiness div,
+.repair-payment-readiness div {
+  display: grid;
+  gap: 3px;
+}
+
+.repair-part-readiness small,
+.repair-payment-readiness small {
+  grid-column: span 2;
+}
+
+.repair-part-readiness.is-ready,
+.repair-payment-readiness.is-ready {
+  border-color: #bfe5d1;
+  background: #f0fbf5;
+}
+
+.repair-part-readiness.is-blocked,
+.repair-payment-readiness.is-blocked {
+  border-color: #f5d389;
+  background: #fff8e8;
 }
 
 .repair-focus-card__body p {
@@ -1570,7 +1656,7 @@ button:disabled {
 
 .repair-invoice-card {
   display: grid;
-  grid-template-columns: repeat(4, minmax(0, 1fr));
+  grid-template-columns: repeat(5, minmax(0, 1fr));
   gap: 8px;
 }
 
@@ -3868,6 +3954,12 @@ button:disabled {
   }
 
   .repair-invoice-card {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .repair-stage-strip,
+  .repair-part-readiness,
+  .repair-payment-readiness {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 

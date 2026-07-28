@@ -54,6 +54,7 @@ const pipeline = [
   "received",
   "diagnosing",
   "quote_pending",
+  "customer_approved",
   "awaiting_parts",
   "repairing",
   "ready_for_pickup",
@@ -122,6 +123,26 @@ function splitList(value: string) {
     .split(/[\n,]+/)
     .map((item) => item.trim())
     .filter(Boolean);
+}
+
+function emailLooksValid(value: string) {
+  const trimmed = value.trim();
+  return !trimmed || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
+
+function phoneLooksValid(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return false;
+  return trimmed.replace(/\D/g, "").length >= 7;
+}
+
+function repairStageIndex(status?: string) {
+  const index = pipeline.indexOf(status ?? "");
+  return index;
+}
+
+function phoneImeiLooksValid(value: string) {
+  return /^\d{15}$/.test(value.trim());
 }
 
 function catalogToVariantOptions(products: CatalogProduct[]): VariantOption[] {
@@ -251,6 +272,112 @@ export function RepairsPage() {
       status: invoice?.payment_status ?? (total > 0 ? "unpaid" : "not_ready"),
     };
   }, [invoice, selectedTicket, selectedTicketParts]);
+  const selectedTicketStageIndex = repairStageIndex(selectedTicket?.status);
+  const selectedTicketPartsTotal = selectedTicketParts.reduce(
+    (sum, part) => sum + Number(part.unit_price) * part.quantity,
+    0,
+  );
+  const diagnosisLaborAmount = Number(diagnosisForm.labor_estimate || 0);
+  const diagnosisPartsAmount = Number(diagnosisForm.parts_estimate || 0);
+  const diagnosisEstimateIssue =
+    !Number.isFinite(diagnosisLaborAmount) ||
+    diagnosisLaborAmount < 0 ||
+    !Number.isFinite(diagnosisPartsAmount) ||
+    diagnosisPartsAmount < 0
+      ? "Labor and parts estimates must be zero or more."
+      : null;
+  const diagnosisQuoteTotal = Math.max(
+    0,
+    diagnosisLaborAmount + diagnosisPartsAmount,
+  );
+  const selectedDeviceType = ticketForm.device_type.toLowerCase();
+  const intakeIdentityIssue =
+    selectedDeviceType === "phone"
+      ? !ticketForm.imei.trim()
+        ? "Phone repairs need the 15-digit IMEI before intake."
+        : !phoneImeiLooksValid(ticketForm.imei)
+          ? "Phone IMEI must be exactly 15 digits."
+          : null
+      : ["laptop", "tablet"].includes(selectedDeviceType) &&
+          !ticketForm.serial_number.trim()
+        ? "Laptop and tablet repairs should capture the serial number."
+        : null;
+  const newCustomerPhoneIsValid = phoneLooksValid(customerForm.phone);
+  const newCustomerEmailIsValid = emailLooksValid(customerForm.email);
+  const newCustomerAlreadyExists =
+    ticketForm.customer_id === "__new__" &&
+    Boolean(customerForm.phone.trim()) &&
+    customers.some(
+      (customer) =>
+        customer.phone.replace(/\D/g, "") ===
+        customerForm.phone.replace(/\D/g, ""),
+    );
+  const intakeFormReady = Boolean(
+    selectedBranchId &&
+      ticketForm.customer_id &&
+      ticketForm.device_brand.trim() &&
+      ticketForm.device_model.trim() &&
+      ticketForm.reported_issue.trim() &&
+      ticketForm.intake_condition.trim() &&
+      !intakeIdentityIssue &&
+      (ticketForm.customer_id !== "__new__" ||
+        (customerForm.full_name.trim() &&
+          newCustomerPhoneIsValid &&
+          newCustomerEmailIsValid &&
+          !newCustomerAlreadyExists)),
+  );
+  const selectedPartNeedsUnit =
+    Boolean(selectedPartVariant) && selectedPartVariant?.trackingType !== "bulk";
+  const partQuantity = Number(partForm.quantity);
+  const partEntryIssue = !selectedTicket
+    ? "Select a ticket before logging parts."
+    : !canLogParts(selectedTicket)
+      ? "Parts unlock after customer quote approval."
+      : !selectedPartVariant
+        ? "Select a repair part from the catalog."
+        : !Number.isInteger(partQuantity) || partQuantity <= 0
+          ? "Part quantity must be a whole number of at least 1."
+          : selectedPartNeedsUnit && partQuantity !== 1
+            ? "Serialized or IMEI parts must be logged one unit at a time."
+            : selectedPartNeedsUnit && !partForm.serialized_unit_id
+              ? "Select the exact serialized/IMEI unit used."
+              : null;
+  const selectedPartProjectedTotal =
+    selectedPartVariant &&
+    Number.isFinite(partQuantity) &&
+    partQuantity > 0
+      ? selectedPartVariant.price * partQuantity
+      : 0;
+  const repairPaymentAmount = Number(paymentForm.amount);
+  const paymentNeedsReference =
+    !["cash", "store_credit"].includes(paymentForm.method);
+  const repairPaymentNeedsTill = !tillSession && Boolean(token) && !isPreview;
+  const paymentIssue = !derivedInvoice
+    ? "Invoice appears after quote approval."
+    : derivedInvoice.due <= 0
+      ? "This repair is fully paid."
+      : repairPaymentNeedsTill
+        ? "Open a till session before receiving repair payments."
+      : !Number.isFinite(repairPaymentAmount) || repairPaymentAmount <= 0
+        ? "Enter a payment amount greater than zero."
+        : repairPaymentAmount > derivedInvoice.due
+          ? `Payment cannot exceed the balance due of ${money(derivedInvoice.due)}.`
+          : paymentNeedsReference && !paymentForm.provider_reference.trim()
+            ? "Non-cash repair payments need a transaction reference."
+            : null;
+  const paymentWillClearBalance =
+    Boolean(derivedInvoice) &&
+    repairPaymentAmount > 0 &&
+    repairPaymentAmount === derivedInvoice?.due;
+  const collectionIssue = !selectedTicket
+    ? "Select a repair ticket first."
+    : selectedTicket.status !== "ready_for_pickup"
+      ? "Collection unlocks when the repair is ready for pickup."
+      : !derivedInvoice
+        ? "Generate the repair invoice before collection."
+        : derivedInvoice.due > 0
+          ? "Collect the outstanding balance before handover."
+          : null;
 
   const visibleTickets = useMemo(() => {
     const needle = ticketSearch.trim().toLowerCase();
@@ -605,29 +732,51 @@ export function RepairsPage() {
 
   async function handleCreateTicket(event: FormEvent) {
     event.preventDefault();
+    const deviceBrand = ticketForm.device_brand.trim();
+    const deviceModel = ticketForm.device_model.trim();
+    const serialNumber = ticketForm.serial_number.trim();
+    const imei = ticketForm.imei.trim();
+    const reportedIssue = ticketForm.reported_issue.trim();
+    const intakeCondition = ticketForm.intake_condition.trim();
+    const customerName = customerForm.full_name.trim();
+    const customerPhone = customerForm.phone.trim();
+    const customerEmail = customerForm.email.trim();
+
     if (!selectedBranchId) {
       setNotice("Select a branch before creating a repair ticket.");
       return;
     }
+    if (!ticketForm.customer_id) {
+      setNotice("Select or create a customer before intake.");
+      return;
+    }
     if (
-      !ticketForm.device_brand ||
-      !ticketForm.device_model ||
-      !ticketForm.reported_issue ||
-      !ticketForm.intake_condition
+      !deviceBrand ||
+      !deviceModel ||
+      !reportedIssue ||
+      !intakeCondition
     ) {
       setNotice("Device brand, model, issue, and intake condition are required.");
       return;
     }
-    if (
-      ticketForm.device_type.toLowerCase() === "phone" &&
-      ticketForm.imei &&
-      !/^\d{15}$/.test(ticketForm.imei)
-    ) {
-      setNotice("Phone IMEI must be exactly 15 digits when provided.");
+    if (intakeIdentityIssue) {
+      setNotice(intakeIdentityIssue);
       return;
     }
-    if (ticketForm.customer_id === "__new__" && (!customerForm.full_name || !customerForm.phone)) {
+    if (ticketForm.customer_id === "__new__" && (!customerName || !customerPhone)) {
       setNotice("New customer name and phone are required.");
+      return;
+    }
+    if (ticketForm.customer_id === "__new__" && !newCustomerPhoneIsValid) {
+      setNotice("New customer phone should have at least 7 digits.");
+      return;
+    }
+    if (ticketForm.customer_id === "__new__" && !newCustomerEmailIsValid) {
+      setNotice("Enter a valid customer email, or leave it blank.");
+      return;
+    }
+    if (newCustomerAlreadyExists) {
+      setNotice("A customer with that phone already exists. Select them from the customer list.");
       return;
     }
 
@@ -645,9 +794,9 @@ export function RepairsPage() {
               created_at: new Date().toISOString(),
               updated_at: new Date().toISOString(),
               is_deleted: false,
-              full_name: customerForm.full_name,
-              phone: customerForm.phone,
-              email: customerForm.email || null,
+              full_name: customerName,
+              phone: customerPhone,
+              email: customerEmail || null,
               address: null,
               loyalty_points: 0,
               credit_limit: "0",
@@ -668,13 +817,13 @@ export function RepairsPage() {
           technician_id: null,
           status: "received",
           device_type: ticketForm.device_type,
-          device_brand: ticketForm.device_brand,
-          device_model: ticketForm.device_model,
-          serial_number: ticketForm.serial_number || null,
-          imei: ticketForm.imei || null,
-          reported_issue: ticketForm.reported_issue,
+          device_brand: deviceBrand,
+          device_model: deviceModel,
+          serial_number: serialNumber || null,
+          imei: imei || null,
+          reported_issue: reportedIssue,
           diagnosis: null,
-          intake_condition: ticketForm.intake_condition,
+          intake_condition: intakeCondition,
           intake_images: [],
           accessories_received: splitList(ticketForm.accessories_received),
           labor_estimate: "0",
@@ -697,14 +846,14 @@ export function RepairsPage() {
 
       let customerId = ticketForm.customer_id;
       if (customerId === "__new__") {
-        if (!customerForm.full_name || !customerForm.phone) {
+        if (!customerName || !customerPhone) {
           setNotice("New customer name and phone are required.");
           return;
         }
         const customer = await createCustomer(token, {
-          full_name: customerForm.full_name,
-          phone: customerForm.phone,
-          email: customerForm.email || null,
+          full_name: customerName,
+          phone: customerPhone,
+          email: customerEmail || null,
           home_branch_id: selectedBranchId,
         });
         setCustomers((current) => [customer, ...current]);
@@ -715,14 +864,14 @@ export function RepairsPage() {
         branch_id: selectedBranchId,
         customer_id: customerId,
         device_type: ticketForm.device_type,
-        device_brand: ticketForm.device_brand,
-        device_model: ticketForm.device_model,
-        serial_number: ticketForm.serial_number || null,
-        imei: ticketForm.imei || null,
-        reported_issue: ticketForm.reported_issue,
+        device_brand: deviceBrand,
+        device_model: deviceModel,
+        serial_number: serialNumber || null,
+        imei: imei || null,
+        reported_issue: reportedIssue,
       });
       const ticket = await recordRepairIntake(token, booking.id, {
-        intake_condition: ticketForm.intake_condition,
+        intake_condition: intakeCondition,
         accessories_received: splitList(ticketForm.accessories_received),
         intake_images: [],
       });
@@ -811,6 +960,10 @@ export function RepairsPage() {
       setNotice("Diagnosis notes are required before preparing a quote.");
       return;
     }
+    if (diagnosisEstimateIssue) {
+      setNotice(diagnosisEstimateIssue);
+      return;
+    }
 
     setBusy(true);
     try {
@@ -818,8 +971,8 @@ export function RepairsPage() {
         updateTicket({
           ...selectedTicket,
           diagnosis: diagnosisForm.diagnosis.trim(),
-          labor_estimate: String(Number(diagnosisForm.labor_estimate) || 0),
-          parts_estimate: String(Number(diagnosisForm.parts_estimate) || 0),
+          labor_estimate: String(diagnosisLaborAmount),
+          parts_estimate: String(diagnosisPartsAmount),
           status: "quote_pending",
           updated_at: new Date().toISOString(),
         });
@@ -829,8 +982,8 @@ export function RepairsPage() {
 
       const ticket = await submitRepairDiagnosis(token, selectedTicket.id, {
         diagnosis: diagnosisForm.diagnosis.trim(),
-        labor_estimate: Number(diagnosisForm.labor_estimate) || 0,
-        parts_estimate: Number(diagnosisForm.parts_estimate) || 0,
+        labor_estimate: diagnosisLaborAmount,
+        parts_estimate: diagnosisPartsAmount,
       });
       updateTicket(ticket);
       setNotice(`Diagnosis submitted for ${ticket.ticket_number}.`);
@@ -893,22 +1046,12 @@ export function RepairsPage() {
       setNotice("Parts can only be logged after the customer approves the quote.");
       return;
     }
-    if (!selectedPartVariant) {
-      setNotice("Select a repair part from the catalog.");
+    if (partEntryIssue) {
+      setNotice(partEntryIssue);
       return;
     }
-    const quantity = Number(partForm.quantity);
-    if (!quantity || quantity <= 0) {
-      setNotice("Part quantity must be at least 1.");
-      return;
-    }
-    if (
-      selectedPartVariant.trackingType !== "bulk" &&
-      !partForm.serialized_unit_id
-    ) {
-      setNotice("Serialized/IMEI repair parts need a specific available unit.");
-      return;
-    }
+    if (!selectedPartVariant) return;
+    const quantity = partQuantity;
 
     setBusy(true);
     try {
@@ -1046,8 +1189,8 @@ export function RepairsPage() {
       return;
     }
     const amount = Number(paymentForm.amount);
-    if (!amount || amount <= 0) {
-      setNotice("Payment amount must be greater than zero.");
+    if (paymentIssue) {
+      setNotice(paymentIssue);
       return;
     }
     if (!tillSession && token && !isPreview) {
@@ -1094,7 +1237,7 @@ export function RepairsPage() {
         till_session_id: tillSession!.id,
         method: paymentForm.method,
         amount,
-        provider_reference: paymentForm.provider_reference || null,
+        provider_reference: paymentForm.provider_reference.trim() || null,
         idempotency_key: paymentIdempotencyKey(),
         notes: paymentForm.notes || null,
       });
@@ -1115,7 +1258,7 @@ export function RepairsPage() {
       return;
     }
     if (!canCollectSelectedTicket()) {
-      setNotice("Repair can only be collected once it is ready and fully paid.");
+      setNotice(collectionIssue ?? "Repair can only be collected once it is ready and fully paid.");
       return;
     }
 
@@ -1249,6 +1392,26 @@ export function RepairsPage() {
                   <b>{money(ticketEstimate(selectedTicket))}</b>
                   Estimate
                 </span>
+              </div>
+              <div className="repair-stage-strip">
+                {pipeline.map((status, index) => {
+                  const isDone = selectedTicketStageIndex > index;
+                  const isCurrent = selectedTicket.status === status;
+                  return (
+                    <span
+                      key={status}
+                      className={[
+                        "repair-stage-strip__step",
+                        isDone ? "is-done" : "",
+                        isCurrent ? "is-current" : "",
+                      ]
+                        .filter(Boolean)
+                        .join(" ")}
+                    >
+                      {titleize(status)}
+                    </span>
+                  );
+                })}
               </div>
               <div className="repair-next-action">
                 <span>Next action</span>
@@ -1416,10 +1579,22 @@ export function RepairsPage() {
                           phone: event.target.value,
                         }))
                       }
-                    />
-                  </label>
-                  <label>
-                    Email
+                      />
+                      {ticketForm.customer_id === "__new__" &&
+                        !newCustomerPhoneIsValid &&
+                        customerForm.phone && (
+                          <span className="repair-field-warning">
+                            Use at least 7 digits for the customer phone.
+                          </span>
+                        )}
+                      {newCustomerAlreadyExists && (
+                        <span className="repair-field-warning">
+                          This phone already belongs to an existing customer.
+                        </span>
+                      )}
+                    </label>
+                    <label>
+                      Email
                     <input
                       value={customerForm.email}
                       onChange={(event) =>
@@ -1429,6 +1604,11 @@ export function RepairsPage() {
                         }))
                       }
                     />
+                    {!newCustomerEmailIsValid && (
+                      <span className="repair-field-warning">
+                        Enter a valid email, or leave it blank.
+                      </span>
+                    )}
                   </label>
                 </div>
               </div>
@@ -1444,6 +1624,37 @@ export function RepairsPage() {
                 Capture what the device physically shows now; this helps avoid
                 handover disputes when the repair is collected.
               </span>
+            </div>
+
+            <div className="repair-intake-checklist">
+              {[
+                {
+                  label: "Customer",
+                  ok:
+                    ticketForm.customer_id !== "__new__"
+                      ? Boolean(ticketForm.customer_id)
+                      : Boolean(
+                          customerForm.full_name.trim() &&
+                            newCustomerPhoneIsValid &&
+                            !newCustomerAlreadyExists,
+                        ),
+                },
+                {
+                  label: "Device identity",
+                  ok: !intakeIdentityIssue,
+                },
+                {
+                  label: "Issue & condition",
+                  ok: Boolean(
+                    ticketForm.reported_issue.trim() &&
+                      ticketForm.intake_condition.trim(),
+                  ),
+                },
+              ].map((check) => (
+                <StatusPill key={check.label} tone={check.ok ? "success" : "warning"}>
+                  {check.label}
+                </StatusPill>
+              ))}
             </div>
 
             <div className="form-grid form-grid--two">
@@ -1483,7 +1694,18 @@ export function RepairsPage() {
                       serial_number: event.target.value,
                     }))
                   }
+                  placeholder={
+                    ["Laptop", "Tablet"].includes(ticketForm.device_type)
+                      ? "Required for laptop/tablet"
+                      : "Optional if available"
+                  }
                 />
+                {intakeIdentityIssue &&
+                  ["Laptop", "Tablet"].includes(ticketForm.device_type) && (
+                    <span className="repair-field-warning">
+                      {intakeIdentityIssue}
+                    </span>
+                  )}
               </label>
               <label>
                 IMEI
@@ -1495,7 +1717,18 @@ export function RepairsPage() {
                       imei: event.target.value,
                     }))
                   }
+                  inputMode="numeric"
+                  placeholder={
+                    ticketForm.device_type === "Phone"
+                      ? "Required · 15 digits"
+                      : "Optional for non-phone devices"
+                  }
                 />
+                {intakeIdentityIssue && ticketForm.device_type === "Phone" && (
+                  <span className="repair-field-warning">
+                    {intakeIdentityIssue}
+                  </span>
+                )}
               </label>
             </div>
 
@@ -1543,7 +1776,7 @@ export function RepairsPage() {
             </div>
 
             <div className="form-footer">
-              <button className="primary-button" disabled={busy}>
+              <button className="primary-button" disabled={busy || !intakeFormReady}>
                 Create Repair Ticket
               </button>
             </div>
@@ -1652,9 +1885,29 @@ export function RepairsPage() {
                       />
                     </label>
                   </div>
+                  <div className="repair-quote-preview">
+                    <div>
+                      <span>Quote preview</span>
+                      <strong>{money(diagnosisQuoteTotal)}</strong>
+                    </div>
+                    <small>
+                      Labor {money(diagnosisLaborAmount || 0)} · Parts{" "}
+                      {money(diagnosisPartsAmount || 0)}
+                    </small>
+                    {diagnosisEstimateIssue && (
+                      <span className="repair-field-warning">
+                        {diagnosisEstimateIssue}
+                      </span>
+                    )}
+                  </div>
                   <button
                     className="secondary-button"
-                    disabled={busy || !canSubmitDiagnosis(selectedTicket)}
+                    disabled={
+                      busy ||
+                      !canSubmitDiagnosis(selectedTicket) ||
+                      !diagnosisForm.diagnosis.trim() ||
+                      Boolean(diagnosisEstimateIssue)
+                    }
                   >
                     Submit Diagnosis
                   </button>
@@ -1770,6 +2023,8 @@ export function RepairsPage() {
                       <input
                         type="number"
                         min="1"
+                        step="1"
+                        max={selectedPartNeedsUnit ? 1 : undefined}
                         value={partForm.quantity}
                         onChange={(event) =>
                           setPartForm((current) => ({
@@ -1779,7 +2034,7 @@ export function RepairsPage() {
                         }
                       />
                     </label>
-                    {selectedPartVariant?.trackingType !== "bulk" ? (
+                    {selectedPartNeedsUnit ? (
                       <label>
                         Serial / IMEI unit
                         <select
@@ -1802,13 +2057,44 @@ export function RepairsPage() {
                     ) : (
                       <div className="repair-form-hint repair-form-hint--inline">
                         <span>Tracking</span>
-                        <strong>Bulk quantity part</strong>
+                        <strong>
+                          {selectedPartVariant
+                            ? "Bulk quantity part"
+                            : "Select a part first"}
+                        </strong>
                       </div>
                     )}
                   </div>
+                  <div
+                    className={`repair-part-readiness ${
+                      partEntryIssue ? "is-blocked" : "is-ready"
+                    }`}
+                  >
+                    <div>
+                      <span>Selected part</span>
+                      <strong>
+                        {selectedPartVariant
+                          ? selectedPartVariant.label
+                          : "No part selected"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Tracking</span>
+                      <strong>
+                        {selectedPartVariant
+                          ? titleize(selectedPartVariant.trackingType)
+                          : "Waiting"}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Line value</span>
+                      <strong>{money(selectedPartProjectedTotal)}</strong>
+                    </div>
+                    <small>{partEntryIssue ?? "Ready to deduct from inventory when logged."}</small>
+                  </div>
                   <button
                     className="secondary-button"
-                    disabled={busy || !canLogParts(selectedTicket)}
+                    disabled={busy || Boolean(partEntryIssue)}
                   >
                     Log Part Used
                   </button>
@@ -1870,6 +2156,10 @@ export function RepairsPage() {
                         <span>Paid</span>
                         <strong>{money(derivedInvoice.paid)}</strong>
                       </div>
+                      <div>
+                        <span>Balance</span>
+                        <strong>{money(derivedInvoice.due)}</strong>
+                      </div>
                     </div>
                   ) : (
                     <p className="muted">
@@ -1928,6 +2218,8 @@ export function RepairsPage() {
                       <input
                         type="number"
                         min="1"
+                        step="0.01"
+                        max={derivedInvoice?.due ?? undefined}
                         value={paymentForm.amount}
                         onChange={(event) =>
                           setPaymentForm((current) => ({
@@ -1938,8 +2230,43 @@ export function RepairsPage() {
                       />
                     </label>
                   </div>
+                  <div
+                    className={`repair-payment-readiness ${
+                      paymentIssue ? "is-blocked" : "is-ready"
+                    }`}
+                  >
+                    <div>
+                      <span>Payment status</span>
+                      <strong>
+                        {derivedInvoice
+                          ? titleize(derivedInvoice.status)
+                          : "No invoice yet"}
+                      </strong>
+                    </div>
+                    <small>
+                      {paymentIssue ??
+                        (paymentWillClearBalance
+                          ? "This payment clears the repair balance."
+                          : "Ready to record a partial repair payment.")}
+                    </small>
+                    {derivedInvoice && derivedInvoice.due > 0 && (
+                      <button
+                        className="secondary-button"
+                        type="button"
+                        disabled={busy}
+                        onClick={() =>
+                          setPaymentForm((current) => ({
+                            ...current,
+                            amount: String(derivedInvoice.due),
+                          }))
+                        }
+                      >
+                        Fill Balance
+                      </button>
+                    )}
+                  </div>
                   <label>
-                    Reference / notes
+                    Reference
                     <input
                       value={paymentForm.provider_reference}
                       onChange={(event) =>
@@ -1948,18 +2275,55 @@ export function RepairsPage() {
                           provider_reference: event.target.value,
                         }))
                       }
-                      placeholder="M-Pesa code, card auth, cash note"
+                      placeholder={
+                        paymentNeedsReference
+                          ? "Required for M-Pesa, card, or transfer"
+                          : "Optional cash note"
+                      }
+                    />
+                  </label>
+                  <label>
+                    Payment notes
+                    <textarea
+                      value={paymentForm.notes}
+                      onChange={(event) =>
+                        setPaymentForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      placeholder="Optional payment context"
                     />
                   </label>
                   <button
                     className="primary-button"
-                    disabled={busy || !derivedInvoice || derivedInvoice.due <= 0}
+                    disabled={
+                      busy ||
+                      Boolean(paymentIssue) ||
+                      repairPaymentNeedsTill
+                    }
                   >
                     Record Repair Payment
                   </button>
                 </form>
 
                 <div className="action-form">
+                  <div
+                    className={`repair-payment-readiness ${
+                      collectionIssue ? "is-blocked" : "is-ready"
+                    }`}
+                  >
+                    <div>
+                      <span>Handover</span>
+                      <strong>
+                        {collectionIssue ? "Not ready to collect" : "Ready to collect"}
+                      </strong>
+                    </div>
+                    <small>
+                      {collectionIssue ??
+                        "Payment is complete and the device can be handed over."}
+                    </small>
+                  </div>
                   <button
                     className="primary-button"
                     disabled={busy || !canCollectSelectedTicket()}
