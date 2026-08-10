@@ -43,6 +43,28 @@ function marginPercent(profit: string, revenue: string) {
   return percentage(profit, revenue);
 }
 
+function scoreTone(score: number): StatusTone {
+  if (score >= 80) return "success";
+  if (score >= 60) return "warning";
+  return "danger";
+}
+
+function ratioTone(value: number, warningAt: number, dangerAt: number): StatusTone {
+  if (value >= dangerAt) return "danger";
+  if (value >= warningAt) return "warning";
+  return "success";
+}
+
+function inverseRatioTone(
+  value: number,
+  warningBelow: number,
+  dangerBelow: number,
+): StatusTone {
+  if (value <= dangerBelow) return "danger";
+  if (value <= warningBelow) return "warning";
+  return "success";
+}
+
 type DatePreset = "today" | "last_7" | "last_30" | "this_month" | "custom";
 
 const datePresets: Array<{ value: DatePreset; label: string }> = [
@@ -113,18 +135,26 @@ export function ReportsPage() {
     [sales.top_items],
   );
 
+  const grossSales = numberValue(sales.gross_sales);
+  const netSales = numberValue(sales.net_sales);
+  const paidAmount = numberValue(sales.paid_amount);
+  const discountAmount = numberValue(sales.discount_amount);
+  const refundAmount = numberValue(sales.refund_amount);
+  const approvedExpenseAmount = numberValue(expenses.total_approved_expenses);
+  const repairPaymentAmount = numberValue(repairs.payment_total);
+  const topItemsRevenue = sales.top_items.reduce(
+    (sum, item) => sum + numberValue(item.revenue),
+    0,
+  );
   const cashAfterExpenses =
-    numberValue(sales.net_sales) +
-    numberValue(repairs.payment_total) -
-    numberValue(expenses.total_approved_expenses);
+    netSales + repairPaymentAmount - approvedExpenseAmount;
 
   const averageRepairValue = repairs.ticket_count
     ? (numberValue(repairs.labor_estimate_total) +
         numberValue(repairs.parts_revenue_total)) /
       repairs.ticket_count
     : 0;
-  const operatingRevenue =
-    numberValue(sales.net_sales) + numberValue(repairs.payment_total);
+  const operatingRevenue = netSales + repairPaymentAmount;
   const expenseRatio = percentage(expenses.total_approved_expenses, operatingRevenue);
   const repairCollectionRate = percentage(
     repairs.collected_ticket_count,
@@ -136,6 +166,29 @@ export function ReportsPage() {
   );
   const refundRate = percentage(sales.refund_amount, sales.gross_sales);
   const discountRate = percentage(sales.discount_amount, sales.gross_sales);
+  const reservedStockRate = percentage(inventory.total_reserved, inventory.total_on_hand);
+  const topItemsMarginRate = percentage(grossProfit, topItemsRevenue);
+  const businessHealthPenalty =
+    (inventory.low_stock_count ? Math.min(24, 6 + inventory.low_stock_count * 2) : 0) +
+    (expenses.pending_expense_count
+      ? Math.min(15, 5 + expenses.pending_expense_count * 2)
+      : 0) +
+    (refundRate >= 8 ? 18 : refundRate >= 5 ? 10 : refundRate >= 3 ? 5 : 0) +
+    (expenseRatio >= 45 ? 18 : expenseRatio >= 35 ? 10 : expenseRatio >= 25 ? 5 : 0) +
+    (repairs.ticket_count && repairCollectionRate <= 50
+      ? 12
+      : repairs.ticket_count && repairCollectionRate <= 70
+        ? 6
+        : 0) +
+    (cashAfterExpenses < 0 ? 20 : 0);
+  const businessHealthScore = Math.max(0, Math.min(100, 100 - businessHealthPenalty));
+  const businessHealthTone = scoreTone(businessHealthScore);
+  const businessHealthLabel =
+    businessHealthScore >= 80
+      ? "Healthy"
+      : businessHealthScore >= 60
+        ? "Needs attention"
+        : "Intervention needed";
   const branchLabel =
     selectedBranchId === "all"
       ? "All branches"
@@ -224,7 +277,7 @@ export function ReportsPage() {
     },
     {
       label: "Reserved stock pressure",
-      value: `${percentage(inventory.total_reserved, inventory.total_on_hand)}%`,
+      value: `${reservedStockRate}%`,
       detail: `${integer(inventory.total_reserved)} of ${integer(
         inventory.total_on_hand,
       )} units are reserved`,
@@ -241,6 +294,172 @@ export function ReportsPage() {
       value: `${expenseRatio}%`,
       detail: "Approved expenses vs operating revenue",
       tone: expenseRatio > 35 ? "warning" : "success",
+    },
+  ];
+
+  const actionQueue: Array<{
+    label: string;
+    owner: string;
+    detail: string;
+    tone: StatusTone;
+  }> = [];
+
+  if (inventory.low_stock_count > 0) {
+    actionQueue.push({
+      label: "Create or review purchase orders",
+      owner: "Inventory",
+      detail: `${integer(inventory.low_stock_count)} item(s) are below reorder level.`,
+      tone: inventory.low_stock_count > 5 ? "danger" : "warning",
+    });
+  }
+
+  if (expenses.pending_expense_count > 0) {
+    actionQueue.push({
+      label: "Approve pending expenses",
+      owner: "Finance",
+      detail: `${integer(expenses.pending_expense_count)} expense(s) still affect reporting clarity.`,
+      tone: "warning",
+    });
+  }
+
+  if (repairs.ready_ticket_count > 0) {
+    actionQueue.push({
+      label: "Call ready repair customers",
+      owner: "Repairs",
+      detail: `${integer(repairs.ready_ticket_count)} device(s) are ready for pickup.`,
+      tone: "info",
+    });
+  }
+
+  if (refundRate >= 5) {
+    actionQueue.push({
+      label: "Review refund and void approvals",
+      owner: "Sales",
+      detail: `Refunds are ${refundRate}% of gross sales in this period.`,
+      tone: refundRate >= 8 ? "danger" : "warning",
+    });
+  }
+
+  if (expenseRatio >= 35) {
+    actionQueue.push({
+      label: "Check expense pressure",
+      owner: "Owner",
+      detail: `Approved expenses are ${expenseRatio}% of operating revenue.`,
+      tone: expenseRatio >= 45 ? "danger" : "warning",
+    });
+  }
+
+  if (cashAfterExpenses < 0) {
+    actionQueue.push({
+      label: "Review cash position",
+      owner: "Owner",
+      detail: "Sales plus repair payments are not covering approved expenses.",
+      tone: "danger",
+    });
+  }
+
+  if (!actionQueue.length) {
+    actionQueue.push({
+      label: "No urgent action",
+      owner: "System",
+      detail: "The selected period has no major report pressure points.",
+      tone: "success",
+    });
+  }
+
+  const financeBridge: Array<{
+    label: string;
+    value: string;
+    detail: string;
+    tone: StatusTone;
+  }> = [
+    {
+      label: "Gross sales",
+      value: money(grossSales),
+      detail: `${integer(sales.sale_count)} sale(s), ${integer(sales.item_count)} item(s)`,
+      tone: grossSales > 0 ? "success" : "neutral",
+    },
+    {
+      label: "Discounts",
+      value: `-${money(discountAmount)}`,
+      detail: `${discountRate}% of gross sales`,
+      tone: ratioTone(discountRate, 8, 15),
+    },
+    {
+      label: "Refunds",
+      value: `-${money(refundAmount)}`,
+      detail: `${refundRate}% of gross sales`,
+      tone: ratioTone(refundRate, 5, 8),
+    },
+    {
+      label: "Net sales",
+      value: money(netSales),
+      detail: `${money(paidAmount)} collected through sales payments`,
+      tone: netSales > 0 ? "success" : "neutral",
+    },
+    {
+      label: "Repair payments",
+      value: `+${money(repairPaymentAmount)}`,
+      detail: `${integer(repairs.collected_ticket_count)} collected repair ticket(s)`,
+      tone: repairPaymentAmount > 0 ? "info" : "neutral",
+    },
+    {
+      label: "Approved expenses",
+      value: `-${money(approvedExpenseAmount)}`,
+      detail: `${integer(expenses.approved_expense_count)} approved expense(s)`,
+      tone: expenseRatio >= 35 ? "warning" : "neutral",
+    },
+    {
+      label: "Cash after expenses",
+      value: money(cashAfterExpenses),
+      detail: "Net sales + repair payments - approved expenses",
+      tone: cashAfterExpenses >= 0 ? "success" : "danger",
+    },
+  ];
+
+  const ratioCards: Array<{
+    label: string;
+    value: number;
+    detail: string;
+    tone: StatusTone;
+  }> = [
+    {
+      label: "Refund rate",
+      value: refundRate,
+      detail: `${money(refundAmount)} refunded`,
+      tone: ratioTone(refundRate, 5, 8),
+    },
+    {
+      label: "Discount rate",
+      value: discountRate,
+      detail: `${money(discountAmount)} discounted`,
+      tone: ratioTone(discountRate, 8, 15),
+    },
+    {
+      label: "Repair collection",
+      value: repairCollectionRate,
+      detail: `${integer(repairs.collected_ticket_count)} of ${integer(repairs.ticket_count)} ticket(s)`,
+      tone: repairs.ticket_count
+        ? inverseRatioTone(repairCollectionRate, 70, 50)
+        : "neutral",
+    },
+    {
+      label: "Stock availability",
+      value: stockAvailability,
+      detail: `${integer(inventory.total_available)} of ${integer(inventory.total_on_hand)} unit(s) available`,
+      tone: inverseRatioTone(stockAvailability, 60, 40),
+    },
+    {
+      label: "Reserved stock",
+      value: reservedStockRate,
+      detail: `${integer(inventory.total_reserved)} unit(s) reserved`,
+      tone: ratioTone(reservedStockRate, 20, 35),
+    },
+    {
+      label: "Top-item margin",
+      value: topItemsMarginRate,
+      detail: `${money(grossProfit)} visible gross profit`,
+      tone: topItemsRevenue ? inverseRatioTone(topItemsMarginRate, 20, 10) : "neutral",
     },
   ];
 
@@ -437,6 +656,39 @@ export function ReportsPage() {
 
       {notice && <div className="notice notice--page">{notice}</div>}
 
+      <section className="report-command-center">
+        <article className="report-health-card">
+          <div>
+            <span>Business health</span>
+            <strong>{businessHealthScore}%</strong>
+            <StatusPill tone={businessHealthTone}>{businessHealthLabel}</StatusPill>
+          </div>
+          <p>
+            Score combines low stock, expense pressure, refunds, repair
+            collection, and cash after approved expenses for the selected view.
+          </p>
+          <div className="report-health-meter">
+            <span style={{ width: `${businessHealthScore}%` }} />
+          </div>
+        </article>
+
+        <article className="report-action-queue">
+          <div className="report-action-queue__header">
+            <span>Decision queue</span>
+            <strong>{integer(actionQueue.length)} item(s)</strong>
+          </div>
+          <div className="report-action-list">
+            {actionQueue.map((item) => (
+              <div key={`${item.owner}-${item.label}`}>
+                <StatusPill tone={item.tone}>{item.owner}</StatusPill>
+                <strong>{item.label}</strong>
+                <span>{item.detail}</span>
+              </div>
+            ))}
+          </div>
+        </article>
+      </section>
+
       <div className="stats-grid">
         <article className="metric-card">
           <span>Net sales</span>
@@ -488,6 +740,52 @@ export function ReportsPage() {
             <StatusPill tone={insight.tone}>{insight.detail}</StatusPill>
           </article>
         ))}
+      </section>
+
+      <section className="panel-card m-t">
+        <header className="panel-card__header">
+          <div>
+            <p className="eyebrow">Money flow</p>
+            <h2>Finance bridge</h2>
+          </div>
+          <StatusPill tone={cashAfterExpenses >= 0 ? "success" : "danger"}>
+            {money(cashAfterExpenses)}
+          </StatusPill>
+        </header>
+        <div className="report-finance-bridge">
+          {financeBridge.map((item) => (
+            <article key={item.label}>
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <small>{item.detail}</small>
+              <StatusPill tone={item.tone}>{titleize(item.tone)}</StatusPill>
+            </article>
+          ))}
+        </div>
+      </section>
+
+      <section className="panel-card m-t">
+        <header className="panel-card__header">
+          <div>
+            <p className="eyebrow">Control ratios</p>
+            <h2>Business pressure gauges</h2>
+          </div>
+        </header>
+        <div className="report-ratio-grid">
+          {ratioCards.map((item) => (
+            <article key={item.label}>
+              <div>
+                <span>{item.label}</span>
+                <strong>{item.value}%</strong>
+              </div>
+              <div className="report-bar">
+                <span style={{ width: `${item.value}%` }} />
+              </div>
+              <small>{item.detail}</small>
+              <StatusPill tone={item.tone}>{titleize(item.tone)}</StatusPill>
+            </article>
+          ))}
+        </div>
       </section>
 
       <div className="dashboard-grid m-t">
