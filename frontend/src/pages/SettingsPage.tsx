@@ -85,6 +85,17 @@ function codeFromName(name: string, suffix = "") {
   return code ? `${code}${suffix}`.slice(0, 30) : "";
 }
 
+function emailLooksValid(value: string) {
+  const trimmed = value.trim();
+  return !trimmed || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
+
+function phoneLooksValid(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return trimmed.replace(/\D/g, "").length >= 7;
+}
+
 function setupChecklist(branch: Branch | undefined, tills: Till[]) {
   const activeTills = tills.filter((till) => till.is_active);
   return [
@@ -234,6 +245,52 @@ export function SettingsPage() {
   ];
   const selectedBranchContact =
     selectedBranch?.phone || selectedBranch?.email || "No contact set";
+  const branchFormIssue = !branchForm.name.trim()
+    ? "Branch name is required."
+    : !phoneLooksValid(branchForm.phone)
+      ? "Branch phone should have at least 7 digits, or be left blank."
+      : !emailLooksValid(branchForm.email)
+        ? "Enter a valid branch email, or leave it blank."
+        : null;
+  const newBranchCode = codeFromName(newBranchForm.code || newBranchForm.name);
+  const newBranchCodeExists =
+    Boolean(newBranchCode) &&
+    branches.some((branch) => branch.code.toUpperCase() === newBranchCode);
+  const newBranchIssue = !newBranchForm.name.trim()
+    ? "New branch name is required."
+    : !newBranchCode
+      ? "New branch code is required."
+      : newBranchCodeExists
+        ? "That branch code already exists."
+        : !phoneLooksValid(newBranchForm.phone)
+          ? "Branch phone should have at least 7 digits, or be left blank."
+          : !emailLooksValid(newBranchForm.email)
+            ? "Enter a valid branch email, or leave it blank."
+            : null;
+  const tillCode = codeFromName(tillForm.code || tillForm.name);
+  const tillCodeExists =
+    Boolean(tillCode) &&
+    branchTills.some((till) => till.code.toUpperCase() === tillCode);
+  const createTillIssue = !selectedBranch
+    ? "Select a branch before creating a till."
+    : !tillForm.name.trim()
+      ? "Till name is required."
+      : !tillCode
+        ? "Till code is required."
+        : tillCodeExists
+          ? "That till code already exists for this branch."
+          : null;
+  const deactivatingLastTill =
+    Boolean(selectedTill?.is_active) &&
+    !tillEditForm.is_active &&
+    activeBranchTills.length <= 1;
+  const updateTillIssue = !selectedTill
+    ? "Select a till first."
+    : !tillEditForm.name.trim()
+      ? "Till name is required."
+      : deactivatingLastTill
+        ? "Keep at least one active till so POS can open sessions."
+        : null;
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -336,8 +393,8 @@ export function SettingsPage() {
       setNotice("Select a branch first.");
       return;
     }
-    if (!branchForm.name.trim()) {
-      setNotice("Branch name is required.");
+    if (branchFormIssue) {
+      setNotice(branchFormIssue);
       return;
     }
 
@@ -348,8 +405,8 @@ export function SettingsPage() {
           ...selectedBranch,
           updated_at: new Date().toISOString(),
           name: branchForm.name.trim(),
-          phone: branchForm.phone || null,
-          email: branchForm.email || null,
+          phone: branchForm.phone.trim() || null,
+          email: branchForm.email.trim().toLowerCase() || null,
           address: branchForm.address || null,
           city: branchForm.city || null,
           country: branchForm.country || "Kenya",
@@ -361,8 +418,8 @@ export function SettingsPage() {
 
       const branch = await updateBranch(token, selectedBranch.id, {
         name: branchForm.name.trim(),
-        phone: branchForm.phone || null,
-        email: branchForm.email || null,
+        phone: branchForm.phone.trim() || null,
+        email: branchForm.email.trim().toLowerCase() || null,
         address: branchForm.address || null,
         city: branchForm.city || null,
         country: branchForm.country || "Kenya",
@@ -379,8 +436,8 @@ export function SettingsPage() {
 
   async function handleCreateBranch(event: FormEvent) {
     event.preventDefault();
-    if (!newBranchForm.name.trim() || !newBranchForm.code.trim()) {
-      setNotice("New branch name and code are required.");
+    if (newBranchIssue) {
+      setNotice(newBranchIssue);
       return;
     }
 
@@ -393,9 +450,9 @@ export function SettingsPage() {
           updated_at: new Date().toISOString(),
           is_deleted: false,
           name: newBranchForm.name.trim(),
-          code: newBranchForm.code.trim().toUpperCase(),
-          phone: newBranchForm.phone || null,
-          email: newBranchForm.email || null,
+          code: newBranchCode,
+          phone: newBranchForm.phone.trim() || null,
+          email: newBranchForm.email.trim().toLowerCase() || null,
           address: newBranchForm.address || null,
           city: newBranchForm.city || null,
           country: newBranchForm.country || "Kenya",
@@ -410,9 +467,9 @@ export function SettingsPage() {
 
       const branch = await createBranch(token, {
         name: newBranchForm.name.trim(),
-        code: newBranchForm.code.trim().toUpperCase(),
-        phone: newBranchForm.phone || null,
-        email: newBranchForm.email || null,
+        code: newBranchCode,
+        phone: newBranchForm.phone.trim() || null,
+        email: newBranchForm.email.trim().toLowerCase() || null,
         address: newBranchForm.address || null,
         city: newBranchForm.city || null,
         country: newBranchForm.country || "Kenya",
@@ -430,14 +487,11 @@ export function SettingsPage() {
 
   async function handleCreateTill(event: FormEvent) {
     event.preventDefault();
-    if (!selectedBranch) {
-      setNotice("Select a branch before creating a till.");
+    if (createTillIssue) {
+      setNotice(createTillIssue);
       return;
     }
-    if (!tillForm.name.trim() || !tillForm.code.trim()) {
-      setNotice("Till name and code are required.");
-      return;
-    }
+    if (!selectedBranch) return;
 
     setBusy(true);
     try {
@@ -449,7 +503,7 @@ export function SettingsPage() {
           is_deleted: false,
           branch_id: selectedBranch.id,
           name: tillForm.name.trim(),
-          code: tillForm.code.trim().toUpperCase(),
+          code: tillCode,
           is_active: true,
         };
         upsertTill(till);
@@ -461,7 +515,7 @@ export function SettingsPage() {
       const till = await createTill(token, {
         branch_id: selectedBranch.id,
         name: tillForm.name.trim(),
-        code: tillForm.code.trim().toUpperCase(),
+        code: tillCode,
       });
       upsertTill(till);
       setTillForm(emptyTillForm);
@@ -475,14 +529,11 @@ export function SettingsPage() {
 
   async function handleUpdateTill(event: FormEvent) {
     event.preventDefault();
-    if (!selectedTill) {
-      setNotice("Select a till first.");
+    if (updateTillIssue) {
+      setNotice(updateTillIssue);
       return;
     }
-    if (!tillEditForm.name.trim()) {
-      setNotice("Till name is required.");
-      return;
-    }
+    if (!selectedTill) return;
 
     setBusy(true);
     try {
@@ -765,6 +816,11 @@ export function SettingsPage() {
                     }))
                   }
                 />
+                {!phoneLooksValid(branchForm.phone) && (
+                  <span className="settings-field-warning">
+                    Use at least 7 digits, or leave phone blank.
+                  </span>
+                )}
               </label>
               <label>
                 Email
@@ -778,6 +834,11 @@ export function SettingsPage() {
                     }))
                   }
                 />
+                {!emailLooksValid(branchForm.email) && (
+                  <span className="settings-field-warning">
+                    Enter a valid email, or leave it blank.
+                  </span>
+                )}
               </label>
               <label>
                 City
@@ -832,8 +893,14 @@ export function SettingsPage() {
                 <option value="closed">Closed</option>
               </select>
             </label>
+            {branchFormIssue && (
+              <span className="settings-field-warning">{branchFormIssue}</span>
+            )}
             <div className="form-footer">
-              <button className="primary-button" disabled={busy || !selectedBranch}>
+              <button
+                className="primary-button"
+                disabled={busy || !selectedBranch || Boolean(branchFormIssue)}
+              >
                 Save Branch
               </button>
             </div>
@@ -880,9 +947,20 @@ export function SettingsPage() {
                     }
                     placeholder="HQ-POS-01"
                   />
+                  {tillCodeExists && (
+                    <span className="settings-field-warning">
+                      That till code already exists for this branch.
+                    </span>
+                  )}
                 </label>
               </div>
-              <button className="secondary-button" disabled={busy || !selectedBranch}>
+              {createTillIssue && (
+                <span className="settings-field-warning">{createTillIssue}</span>
+              )}
+              <button
+                className="secondary-button"
+                disabled={busy || Boolean(createTillIssue)}
+              >
                 Create Till
               </button>
             </form>
@@ -926,7 +1004,13 @@ export function SettingsPage() {
                     <option value="false">Inactive</option>
                   </select>
                 </label>
-                <button className="primary-button" disabled={busy}>
+                {updateTillIssue && (
+                  <span className="settings-field-warning">{updateTillIssue}</span>
+                )}
+                <button
+                  className="primary-button"
+                  disabled={busy || Boolean(updateTillIssue)}
+                >
                   Save Till
                 </button>
               </form>
@@ -1013,6 +1097,11 @@ export function SettingsPage() {
                   }
                   placeholder="WEST"
                 />
+                {newBranchCodeExists && (
+                  <span className="settings-field-warning">
+                    That branch code already exists.
+                  </span>
+                )}
               </label>
               <label>
                 Phone
@@ -1025,6 +1114,11 @@ export function SettingsPage() {
                     }))
                   }
                 />
+                {!phoneLooksValid(newBranchForm.phone) && (
+                  <span className="settings-field-warning">
+                    Use at least 7 digits, or leave phone blank.
+                  </span>
+                )}
               </label>
               <label>
                 City
@@ -1037,6 +1131,24 @@ export function SettingsPage() {
                     }))
                   }
                 />
+              </label>
+              <label>
+                Email
+                <input
+                  type="email"
+                  value={newBranchForm.email}
+                  onChange={(event) =>
+                    setNewBranchForm((current) => ({
+                      ...current,
+                      email: event.target.value,
+                    }))
+                  }
+                />
+                {!emailLooksValid(newBranchForm.email) && (
+                  <span className="settings-field-warning">
+                    Enter a valid email, or leave it blank.
+                  </span>
+                )}
               </label>
             </div>
             <label>
@@ -1064,8 +1176,14 @@ export function SettingsPage() {
               />
               Mark as headquarters
             </label>
+            {newBranchIssue && (
+              <span className="settings-field-warning">{newBranchIssue}</span>
+            )}
             <div className="form-footer">
-              <button className="secondary-button" disabled={busy}>
+              <button
+                className="secondary-button"
+                disabled={busy || Boolean(newBranchIssue)}
+              >
                 Add Branch
               </button>
             </div>

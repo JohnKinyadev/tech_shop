@@ -145,6 +145,42 @@ function roleCodeFromName(name: string) {
   return usernameFromName(name).slice(0, 50);
 }
 
+function emailLooksValid(value: string) {
+  const trimmed = value.trim();
+  return !trimmed || /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(trimmed);
+}
+
+function phoneLooksValid(value: string) {
+  const trimmed = value.trim();
+  if (!trimmed) return true;
+  return trimmed.replace(/\D/g, "").length >= 7;
+}
+
+function passwordChecks(password: string) {
+  return [
+    { label: "8+ characters", ok: password.length >= 8 },
+    { label: "Uppercase", ok: /[A-Z]/.test(password) },
+    { label: "Lowercase", ok: /[a-z]/.test(password) },
+    { label: "Number", ok: /\d/.test(password) },
+    { label: "Symbol", ok: /[^A-Za-z0-9]/.test(password) },
+  ];
+}
+
+function roleRequiresBranch(role?: Role | AssignableRole) {
+  if (!role) return false;
+  return role.code !== "admin";
+}
+
+const sensitivePermissionCodes = new Set([
+  "branches.manage",
+  "staff.manage",
+  "sales.void",
+  "returns.approve",
+  "purchases.approve",
+  "inventory.adjust",
+  "expenses.manage",
+]);
+
 function fallbackPermissions(): Permission[] {
   const now = new Date().toISOString();
   return permissionCatalog.map(([code, description]) => {
@@ -208,6 +244,11 @@ export function RoleStudioPage() {
         ...managedRoles.map((role) => [role.id, role.name] as const),
       ]),
     [assignableRoles, managedRoles],
+  );
+
+  const assignableRoleById = useMemo(
+    () => new Map(assignableRoles.map((role) => [role.id, role])),
+    [assignableRoles],
   );
 
   const roleById = useMemo(
@@ -282,6 +323,160 @@ export function RoleStudioPage() {
         .filter((code): code is string => Boolean(code)),
     [permissionById, roleForm.permission_ids],
   );
+  const selectedRolePermissionSet = useMemo(
+    () => new Set(selectedRolePermissionCodes),
+    [selectedRolePermissionCodes],
+  );
+  const selectedRoleSensitivePermissionCount = selectedRolePermissionCodes.filter(
+    (code) => sensitivePermissionCodes.has(code),
+  ).length;
+  const selectedRoleUserCount = selectedRole
+    ? users.filter((staff) => staff.role_id === selectedRole.id).length
+    : 0;
+  const createRoleChoice = assignableRoleById.get(createForm.role_id);
+  const editRoleChoice = assignableRoleById.get(editForm.role_id);
+  const createPasswordChecks = passwordChecks(createForm.password);
+  const createPasswordIsStrong = createPasswordChecks.every((check) => check.ok);
+  const createUsername = usernameFromName(createForm.username);
+  const createEmail = createForm.email.trim().toLowerCase();
+  const createUsernameExists =
+    Boolean(createUsername) &&
+    users.some((staff) => staff.username.toLowerCase() === createUsername);
+  const createEmailExists =
+    Boolean(createEmail) &&
+    users.some((staff) => staff.email.toLowerCase() === createEmail);
+  const createStaffIssue = !createForm.full_name.trim()
+    ? "Full name is required."
+    : !createUsername
+      ? "Username is required."
+      : createUsernameExists
+        ? "That username already exists."
+        : !createEmail
+          ? "Email is required."
+          : !emailLooksValid(createEmail)
+            ? "Enter a valid email address."
+            : createEmailExists
+              ? "That email already exists."
+              : !phoneLooksValid(createForm.phone)
+                ? "Phone should have at least 7 digits, or be left blank."
+                : !createPasswordIsStrong
+                  ? "Temporary password needs all checklist items."
+                  : !createForm.role_id
+                    ? "Select a role for the staff account."
+                    : roleRequiresBranch(createRoleChoice) && !createForm.branch_id
+                      ? "Branch-scoped roles need a branch."
+                      : null;
+  const editEmail = editForm.email.trim().toLowerCase();
+  const editEmailExists =
+    Boolean(editEmail) &&
+    users.some(
+      (staff) =>
+        staff.id !== selectedUser?.id && staff.email.toLowerCase() === editEmail,
+    );
+  const editStaffIssue = !selectedUser
+    ? "Select a staff user first."
+    : !editForm.full_name.trim()
+      ? "Full name is required."
+      : !editEmail
+        ? "Email is required."
+        : !emailLooksValid(editEmail)
+          ? "Enter a valid email address."
+          : editEmailExists
+            ? "That email already belongs to another staff user."
+            : !phoneLooksValid(editForm.phone)
+              ? "Phone should have at least 7 digits, or be left blank."
+              : !editForm.role_id
+                ? "Select a role for the staff account."
+                : roleRequiresBranch(editRoleChoice) && !editForm.branch_id
+                  ? "Branch-scoped roles need a branch."
+                  : null;
+  const roleCode = roleCodeFromName(roleForm.code || roleForm.name);
+  const creatingNewRole = !selectedRole || selectedRole.is_system;
+  const roleCodeAlreadyExists =
+    Boolean(roleCode) &&
+    managedRoles.some((role) => role.id !== selectedRole?.id && role.code === roleCode);
+  const roleNameAlreadyExists =
+    Boolean(roleForm.name.trim()) &&
+    managedRoles.some(
+      (role) =>
+        role.id !== selectedRole?.id &&
+        role.name.trim().toLowerCase() === roleForm.name.trim().toLowerCase(),
+    );
+  const roleFormIssue = selectedRole?.is_system && selectedRoleId
+    ? "System roles are protected. Create a custom role if you need changes."
+    : !roleForm.name.trim()
+      ? "Role name is required."
+      : !roleCode
+        ? "Role code is required."
+        : roleCodeAlreadyExists
+          ? "That role code already exists."
+          : roleNameAlreadyExists
+            ? "That role name already exists."
+            : !roleForm.permission_ids.length
+              ? "Select at least one permission for this role."
+              : null;
+  const permissionImpactItems = [
+    {
+      label: "Sensitive permissions",
+      value: integer(selectedRoleSensitivePermissionCount),
+      tone: selectedRoleSensitivePermissionCount ? "warning" : "success",
+      detail: selectedRoleSensitivePermissionCount
+        ? "Review manager/owner-only powers carefully."
+        : "No high-risk permissions selected.",
+    },
+    {
+      label: "Operational write access",
+      value: integer(
+        selectedRolePermissionCodes.filter((code) =>
+          /\.(manage|approve|adjust|void|receive|process|update|close|fulfill)$/.test(
+            code,
+          ),
+        ).length,
+      ),
+      tone: selectedRolePermissionCodes.some((code) =>
+        /\.(manage|approve|adjust|void|receive|process|update|close|fulfill)$/.test(
+          code,
+        ),
+      )
+        ? "info"
+        : "neutral",
+      detail: "Permissions that change business records.",
+    },
+    {
+      label: "Report visibility",
+      value: integer(
+        selectedRolePermissionCodes.filter((code) => code.includes("reports."))
+          .length,
+      ),
+      tone: selectedRolePermissionCodes.some((code) => code.includes("reports."))
+        ? "success"
+        : "neutral",
+      detail: "Read-only visibility can be assigned without operations.",
+    },
+  ] satisfies Array<{
+    label: string;
+    value: string;
+    tone: "success" | "warning" | "danger" | "info" | "neutral";
+    detail: string;
+  }>;
+  const permissionWarnings = [
+    selectedRolePermissionSet.has("staff.manage") &&
+    selectedRolePermissionSet.has("branches.manage")
+      ? "Staff + branch management is owner-level power."
+      : null,
+    selectedRolePermissionSet.has("sales.process") &&
+    selectedRolePermissionSet.has("sales.void")
+      ? "This role can both sell and void sales; usually keep voids manager-only."
+      : null,
+    selectedRolePermissionSet.has("inventory.adjust") &&
+    !selectedRolePermissionSet.has("reports.inventory.view")
+      ? "Stock adjustment roles should also see inventory reports."
+      : null,
+    selectedRolePermissionSet.has("expenses.manage") &&
+    !selectedRolePermissionSet.has("expenses.view")
+      ? "Expense managers should also be able to view expense records."
+      : null,
+  ].filter((warning): warning is string => Boolean(warning));
 
   const stats = useMemo(
     () => ({
@@ -446,22 +641,23 @@ export function RoleStudioPage() {
     }));
   }
 
+  function setPermissionGroup(groupPermissions: Permission[], enabled: boolean) {
+    setRoleForm((current) => {
+      const groupIds = new Set(groupPermissions.map((permission) => permission.id));
+      const nextIds = enabled
+        ? [...new Set([...current.permission_ids, ...groupIds])]
+        : current.permission_ids.filter((permissionId) => !groupIds.has(permissionId));
+      return {
+        ...current,
+        permission_ids: nextIds,
+      };
+    });
+  }
+
   async function handleCreateStaff(event: FormEvent) {
     event.preventDefault();
-    if (!createForm.full_name.trim() || !createForm.username.trim()) {
-      setNotice("Full name and username are required.");
-      return;
-    }
-    if (!createForm.email.trim()) {
-      setNotice("Email is required.");
-      return;
-    }
-    if (createForm.password.length < 8) {
-      setNotice("Temporary password must be at least 8 characters.");
-      return;
-    }
-    if (!createForm.role_id) {
-      setNotice("Select a role for the staff account.");
+    if (createStaffIssue) {
+      setNotice(createStaffIssue);
       return;
     }
 
@@ -474,9 +670,9 @@ export function RoleStudioPage() {
           updated_at: new Date().toISOString(),
           is_deleted: false,
           full_name: createForm.full_name.trim(),
-          username: createForm.username.trim().toLowerCase(),
-          email: createForm.email.trim().toLowerCase(),
-          phone: createForm.phone || null,
+          username: createUsername,
+          email: createEmail,
+          phone: createForm.phone.trim() || null,
           branch_id: createForm.branch_id || null,
           role_id: createForm.role_id,
           is_active: true,
@@ -495,9 +691,9 @@ export function RoleStudioPage() {
 
       const nextUser = await createStaffUser(token, {
         full_name: createForm.full_name.trim(),
-        username: createForm.username.trim().toLowerCase(),
-        email: createForm.email.trim().toLowerCase(),
-        phone: createForm.phone || null,
+        username: createUsername,
+        email: createEmail,
+        phone: createForm.phone.trim() || null,
         password: createForm.password,
         role_id: createForm.role_id,
         branch_id: createForm.branch_id || null,
@@ -522,8 +718,8 @@ export function RoleStudioPage() {
       setNotice("Select a staff user first.");
       return;
     }
-    if (!editForm.full_name.trim() || !editForm.email.trim() || !editForm.role_id) {
-      setNotice("Full name, email, and role are required.");
+    if (editStaffIssue) {
+      setNotice(editStaffIssue);
       return;
     }
 
@@ -534,8 +730,8 @@ export function RoleStudioPage() {
           ...selectedUser,
           updated_at: new Date().toISOString(),
           full_name: editForm.full_name.trim(),
-          email: editForm.email.trim().toLowerCase(),
-          phone: editForm.phone || null,
+          email: editEmail,
+          phone: editForm.phone.trim() || null,
           branch_id: editForm.branch_id || null,
           role_id: editForm.role_id,
           is_active: editForm.is_active,
@@ -547,8 +743,8 @@ export function RoleStudioPage() {
 
       const nextUser = await updateStaffUser(token, selectedUser.id, {
         full_name: editForm.full_name.trim(),
-        email: editForm.email.trim().toLowerCase(),
-        phone: editForm.phone || null,
+        email: editEmail,
+        phone: editForm.phone.trim() || null,
         branch_id: editForm.branch_id || null,
         role_id: editForm.role_id,
         is_active: editForm.is_active,
@@ -565,13 +761,9 @@ export function RoleStudioPage() {
 
   async function handleCreateRole(event: FormEvent) {
     event.preventDefault();
-    const code = roleCodeFromName(roleForm.code || roleForm.name);
-    if (!roleForm.name.trim() || !code) {
-      setNotice("Role name and code are required.");
-      return;
-    }
-    if (!roleForm.permission_ids.length) {
-      setNotice("Select at least one permission for this role.");
+    const code = roleCode;
+    if (roleFormIssue) {
+      setNotice(roleFormIssue);
       return;
     }
 
@@ -618,12 +810,8 @@ export function RoleStudioPage() {
       setNotice("Select a role first.");
       return;
     }
-    if (selectedRole.is_system) {
-      setNotice("System roles are protected. Create a custom role if you need changes.");
-      return;
-    }
-    if (!roleForm.name.trim() || !roleForm.permission_ids.length) {
-      setNotice("Role name and at least one permission are required.");
+    if (roleFormIssue) {
+      setNotice(roleFormIssue);
       return;
     }
 
@@ -767,6 +955,11 @@ export function RoleStudioPage() {
                   }
                   placeholder="jane_cashier"
                 />
+                {createUsernameExists && (
+                  <span className="role-field-warning">
+                    This username is already taken.
+                  </span>
+                )}
               </label>
             </div>
 
@@ -783,6 +976,13 @@ export function RoleStudioPage() {
                     }))
                   }
                 />
+                {createEmail && (!emailLooksValid(createEmail) || createEmailExists) && (
+                  <span className="role-field-warning">
+                    {createEmailExists
+                      ? "This email already belongs to another staff user."
+                      : "Enter a valid email address."}
+                  </span>
+                )}
               </label>
               <label>
                 Phone
@@ -795,6 +995,11 @@ export function RoleStudioPage() {
                     }))
                   }
                 />
+                {!phoneLooksValid(createForm.phone) && (
+                  <span className="role-field-warning">
+                    Use at least 7 digits, or leave phone blank.
+                  </span>
+                )}
               </label>
             </div>
 
@@ -836,6 +1041,11 @@ export function RoleStudioPage() {
                     </option>
                   ))}
                 </select>
+                {roleRequiresBranch(createRoleChoice) && !createForm.branch_id && (
+                  <span className="role-field-warning">
+                    This role is branch-scoped, so choose a branch.
+                  </span>
+                )}
               </label>
               <label>
                 Temp password
@@ -852,8 +1062,43 @@ export function RoleStudioPage() {
               </label>
             </div>
 
+            <div className="role-access-preview">
+              <div>
+                <span>Account scope</span>
+                <strong>
+                  {createRoleChoice
+                    ? roleRequiresBranch(createRoleChoice)
+                      ? "Branch-scoped"
+                      : "All branches"
+                    : "Select role"}
+                </strong>
+                <small>
+                  {roleRequiresBranch(createRoleChoice)
+                    ? branchLabel(createForm.branch_id || null)
+                    : "Owner/Admin level roles can work across branches."}
+                </small>
+              </div>
+              <div>
+                <span>Temporary password</span>
+                <strong>{createPasswordIsStrong ? "Ready" : "Needs work"}</strong>
+                <small>Staff will be forced to change it on first login.</small>
+              </div>
+              <div className="role-password-checklist">
+                {createPasswordChecks.map((check) => (
+                  <StatusPill key={check.label} tone={check.ok ? "success" : "warning"}>
+                    {check.label}
+                  </StatusPill>
+                ))}
+              </div>
+              {createStaffIssue && (
+                <span className="role-field-warning role-access-preview__issue">
+                  {createStaffIssue}
+                </span>
+              )}
+            </div>
+
             <div className="form-footer">
-              <button className="primary-button" disabled={busy}>
+              <button className="primary-button" disabled={busy || Boolean(createStaffIssue)}>
                 Create Staff User
               </button>
             </div>
@@ -913,6 +1158,14 @@ export function RoleStudioPage() {
                           }))
                         }
                       />
+                      {editEmail &&
+                        (!emailLooksValid(editEmail) || editEmailExists) && (
+                          <span className="role-field-warning">
+                            {editEmailExists
+                              ? "This email already belongs to another staff user."
+                              : "Enter a valid email address."}
+                          </span>
+                        )}
                     </label>
                     <label>
                       Phone
@@ -925,6 +1178,11 @@ export function RoleStudioPage() {
                           }))
                         }
                       />
+                      {!phoneLooksValid(editForm.phone) && (
+                        <span className="role-field-warning">
+                          Use at least 7 digits, or leave phone blank.
+                        </span>
+                      )}
                     </label>
                     <label>
                       Role
@@ -943,8 +1201,13 @@ export function RoleStudioPage() {
                             {role.name}
                           </option>
                         ))}
-                      </select>
-                    </label>
+                        </select>
+                        {roleRequiresBranch(editRoleChoice) && !editForm.branch_id && (
+                          <span className="role-field-warning">
+                            This role is branch-scoped, so choose a branch.
+                          </span>
+                        )}
+                      </label>
                     <label>
                       Branch
                       <select
@@ -995,7 +1258,38 @@ export function RoleStudioPage() {
                       </select>
                     </label>
                   </div>
-                  <button className="primary-button" disabled={busy}>
+                  <div className="role-access-preview role-access-preview--compact">
+                    <div>
+                      <span>Access after save</span>
+                      <strong>
+                        {editRoleChoice
+                          ? roleRequiresBranch(editRoleChoice)
+                            ? "Branch-scoped"
+                            : "All branches"
+                          : "Select role"}
+                      </strong>
+                      <small>
+                        {roleRequiresBranch(editRoleChoice)
+                          ? branchLabel(editForm.branch_id || null)
+                          : "Owner/Admin level access"}
+                      </small>
+                    </div>
+                    <div>
+                      <span>Account state</span>
+                      <strong>{editForm.is_active ? "Can sign in" : "Disabled"}</strong>
+                      <small>
+                        {editForm.is_verified
+                          ? "Verified account"
+                          : "Marked unverified"}
+                      </small>
+                    </div>
+                    {editStaffIssue && (
+                      <span className="role-field-warning role-access-preview__issue">
+                        {editStaffIssue}
+                      </span>
+                    )}
+                  </div>
+                  <button className="primary-button" disabled={busy || Boolean(editStaffIssue)}>
                     Save Staff Changes
                   </button>
                 </form>
@@ -1120,7 +1414,7 @@ export function RoleStudioPage() {
 
         <form
           className="role-builder"
-          onSubmit={selectedRole && !selectedRole.is_system ? handleUpdateRole : handleCreateRole}
+          onSubmit={creatingNewRole ? handleCreateRole : handleUpdateRole}
         >
           <div className="role-builder__form">
             <div className="form-grid form-grid--three">
@@ -1140,6 +1434,11 @@ export function RoleStudioPage() {
                   }
                   placeholder="Sales Supervisor"
                 />
+                {roleNameAlreadyExists && (
+                  <span className="role-field-warning">
+                    That role name already exists.
+                  </span>
+                )}
               </label>
               <label>
                 Role code
@@ -1154,6 +1453,11 @@ export function RoleStudioPage() {
                   }
                   placeholder="sales_supervisor"
                 />
+                {roleCodeAlreadyExists && (
+                  <span className="role-field-warning">
+                    That role code already exists.
+                  </span>
+                )}
               </label>
               <label>
                 Status
@@ -1192,12 +1496,54 @@ export function RoleStudioPage() {
                   "Choose permissions below"}
               </span>
             </div>
+            <div className="role-impact-panel">
+              {permissionImpactItems.map((item) => (
+                <article key={item.label}>
+                  <span>{item.label}</span>
+                  <strong>{item.value}</strong>
+                  <small>{item.detail}</small>
+                  <StatusPill tone={item.tone}>{titleize(item.tone)}</StatusPill>
+                </article>
+              ))}
+              <div className="role-impact-panel__warnings">
+                {permissionWarnings.length ? (
+                  permissionWarnings.map((warning) => (
+                    <span key={warning}>{warning}</span>
+                  ))
+                ) : (
+                  <span>No risky permission combinations detected.</span>
+                )}
+              </div>
+            </div>
+            {roleFormIssue && (
+              <span className="role-field-warning">{roleFormIssue}</span>
+            )}
           </div>
 
           <div className="permission-matrix permission-matrix--editable">
             {permissionGroups.map(([group, groupPermissions]) => (
               <fieldset key={group}>
-                <legend>{titleize(group)}</legend>
+                <div className="permission-group-header">
+                  <legend>{titleize(group)}</legend>
+                  <div>
+                    <button
+                      className="secondary-button"
+                      type="button"
+                      disabled={selectedRole?.is_system}
+                      onClick={() => setPermissionGroup(groupPermissions, true)}
+                    >
+                      Select group
+                    </button>
+                    <button
+                      className="ghost-button"
+                      type="button"
+                      disabled={selectedRole?.is_system}
+                      onClick={() => setPermissionGroup(groupPermissions, false)}
+                    >
+                      Clear
+                    </button>
+                  </div>
+                </div>
                 {groupPermissions.map((permission) => (
                   <label key={permission.id}>
                     <input
@@ -1229,9 +1575,9 @@ export function RoleStudioPage() {
             </button>
             <button
               className="primary-button"
-              disabled={busy || Boolean(selectedRole?.is_system && selectedRoleId)}
+              disabled={busy || Boolean(roleFormIssue)}
             >
-              {selectedRole && !selectedRole.is_system ? "Save Role" : "Create Role"}
+              {creatingNewRole ? "Create Role" : "Save Role"}
             </button>
           </div>
         </form>

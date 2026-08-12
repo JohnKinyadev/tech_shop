@@ -809,9 +809,58 @@ button:disabled {
 .role-card-list span,
 .role-card-list small,
 .role-builder__summary span,
+.role-access-preview span,
+.role-access-preview small,
+.role-impact-panel span,
+.role-impact-panel small,
+.role-impact-panel__warnings span,
+.role-field-warning,
 .permission-matrix--editable label span {
   color: var(--muted);
   line-height: 1.45;
+}
+
+.role-field-warning {
+  color: #9b2d24;
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.role-access-preview {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 9px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfd;
+}
+
+.role-access-preview--compact {
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+}
+
+.role-access-preview div {
+  display: grid;
+  gap: 3px;
+}
+
+.role-access-preview span,
+.role-impact-panel span {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.role-password-checklist {
+  grid-column: 1 / -1;
+  display: flex;
+  flex-wrap: wrap;
+  gap: 7px;
+}
+
+.role-access-preview__issue {
+  grid-column: 1 / -1;
 }
 
 .role-card-list {
@@ -897,6 +946,51 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: #f8fbfd;
+}
+
+.role-impact-panel {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 9px;
+}
+
+.role-impact-panel article,
+.role-impact-panel__warnings {
+  display: grid;
+  gap: 5px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.role-impact-panel__warnings {
+  grid-column: 1 / -1;
+  border-color: #f5d389;
+  background: #fff8e8;
+}
+
+.permission-group-header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.permission-group-header legend {
+  padding: 0;
+}
+
+.permission-group-header div {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.permission-group-header button {
+  min-height: 28px;
+  padding: 4px 7px;
+  font-size: 12px;
 }
 
 .permission-matrix--editable {
@@ -2140,6 +2234,13 @@ button:disabled {
 .settings-checkbox input {
   width: auto;
   height: auto;
+}
+
+.settings-field-warning {
+  color: #9b2d24;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .expenses-page {
@@ -4101,6 +4202,13 @@ button:disabled {
 
   .settings-context-grid,
   .settings-admin-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .role-rule-grid,
+  .role-access-preview,
+  .role-impact-panel,
+  .permission-matrix--editable {
     grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
