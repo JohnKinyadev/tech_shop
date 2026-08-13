@@ -29,33 +29,47 @@ type AppShellProps = {
 type NavItem = {
   key: AppView;
   label: string;
+  description: string;
   roles?: string[];
   permissions?: string[];
 };
 
 const navItems: NavItem[] = [
-  { key: "dashboard", label: "Dashboard" },
+  {
+    key: "dashboard",
+    label: "Dashboard",
+    description: "Daily command center for sales, repairs, stock, and alerts.",
+  },
   {
     key: "pos",
     label: "Sales / POS",
+    description: "Cashier workspace for tills, carts, payments, and receipts.",
     roles: ["admin", "owner", "branch_manager", "cashier"],
     permissions: ["sales.process", "tills.own.view", "tills.manage"],
   },
   {
     key: "catalog",
     label: "Catalog",
+    description: "Product, variant, category, brand, pricing, and image setup.",
     roles: ["admin", "owner", "branch_manager", "inventory_manager", "cashier"],
     permissions: ["catalog.view", "catalog.manage"],
   },
   {
     key: "inventory",
     label: "Inventory",
+    description: "Live stock balances, serialized units, adjustments, and transfers.",
     roles: ["admin", "owner", "branch_manager", "inventory_manager", "cashier"],
-    permissions: ["inventory.view", "inventory.adjust", "inventory.transfer", "reports.inventory.view"],
+    permissions: [
+      "inventory.view",
+      "inventory.adjust",
+      "inventory.transfer",
+      "reports.inventory.view",
+    ],
   },
   {
     key: "repairs",
     label: "Repairs",
+    description: "Device intake, diagnosis, parts usage, payments, and collection.",
     roles: ["admin", "owner", "branch_manager", "technician"],
     permissions: [
       "repairs.view",
@@ -69,18 +83,21 @@ const navItems: NavItem[] = [
   {
     key: "purchases",
     label: "Purchases",
+    description: "Supplier setup, purchase orders, approvals, and goods receiving.",
     roles: ["admin", "owner", "branch_manager", "inventory_manager"],
     permissions: ["purchases.create", "purchases.approve", "purchases.receive"],
   },
   {
     key: "expenses",
     label: "Expenses",
+    description: "Operating cost capture, category control, and approval workflow.",
     roles: ["admin", "owner", "branch_manager", "accountant"],
     permissions: ["expenses.view", "expenses.manage"],
   },
   {
     key: "reports",
     label: "Reports",
+    description: "Owner visibility across sales, stock, repairs, and expenses.",
     roles: ["admin", "owner", "branch_manager", "inventory_manager", "accountant"],
     permissions: [
       "reports.sales.view",
@@ -93,12 +110,14 @@ const navItems: NavItem[] = [
   {
     key: "roles",
     label: "Staff & Roles",
+    description: "Staff accounts, assignable roles, and permission design.",
     roles: ["admin", "owner", "branch_manager"],
     permissions: ["staff.manage", "roles.manage"],
   },
   {
     key: "settings",
     label: "Settings",
+    description: "Branch profiles, receipt details, tills, and payment readiness.",
     roles: ["admin", "owner", "branch_manager"],
     permissions: ["branches.manage", "tills.manage"],
   },
@@ -141,6 +160,9 @@ export function AppShell({
 }: AppShellProps) {
   const { user, signOut, isPreview } = useAuth();
   const visibleNavItems = navItems.filter((item) => canAccessView(user, item.key));
+  const activeItem = navItems.find((item) => item.key === activeView) ?? navItems[0];
+  const activeTheme =
+    themeOptions.find((option) => option.value === theme) ?? themeOptions[0];
   const branchScope = user && !hasGlobalAccess(user) ? "Assigned branch" : "All branches";
 
   function handleThemeChange(value: string) {
@@ -168,7 +190,7 @@ export function AppShell({
             >
               {themeOptions.map((option) => (
                 <option key={option.value} value={option.value}>
-                  {option.label} — {option.description}
+                  {option.label}: {option.description}
                 </option>
               ))}
             </select>
@@ -194,6 +216,24 @@ export function AppShell({
           </button>
         ))}
       </nav>
+
+      <section className="workspace-context-bar" aria-label="Workspace context">
+        <div>
+          <span>Current module</span>
+          <strong>{activeItem.label}</strong>
+          <small>{activeItem.description}</small>
+        </div>
+        <div>
+          <span>Access scope</span>
+          <strong>{branchScope}</strong>
+          <small>{user?.role_name ?? "Signed-in staff account"}</small>
+        </div>
+        <div>
+          <span>Theme</span>
+          <strong>{activeTheme.label}</strong>
+          <small>{activeTheme.description}</small>
+        </div>
+      </section>
 
       <main className={`erp-workspace erp-workspace--${activeView}`}>
         {children}

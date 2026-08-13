@@ -10,7 +10,7 @@ export const themeOptions: Array<{
   {
     value: "theme-1",
     label: "Theme 1",
-    description: "Classic blue",
+    description: "Classic blue workspace",
   },
   {
     value: "theme-2",
