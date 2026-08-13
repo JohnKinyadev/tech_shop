@@ -404,6 +404,11 @@ export function RepairsPage() {
       return matchesStatus && matchesSearch;
     });
   }, [statusFilter, ticketSearch, tickets, customers, staffUsers]);
+  const selectedTicketHiddenByFilters = Boolean(
+    selectedTicket &&
+      !visibleTickets.some((ticket) => ticket.id === selectedTicket.id) &&
+      (statusFilter !== "all" || ticketSearch.trim()),
+  );
 
   const benchStats = useMemo(
     () => ({
@@ -725,9 +730,15 @@ export function RepairsPage() {
 
   function updateTicket(ticket: RepairTicket) {
     setTickets((current) =>
-      current.map((item) => (item.id === ticket.id ? ticket : item)),
+      [ticket, ...current.filter((item) => item.id !== ticket.id)],
     );
     setSelectedTicketId(ticket.id);
+  }
+
+  function revealTicket(ticket: RepairTicket) {
+    setTicketSearch("");
+    setStatusFilter("all");
+    updateTicket(ticket);
   }
 
   async function handleCreateTicket(event: FormEvent) {
@@ -836,11 +847,12 @@ export function RepairsPage() {
           parts: [],
           status_history: [],
         };
-        setTickets((current) => [ticket, ...current]);
-        setSelectedTicketId(ticket.id);
+        revealTicket(ticket);
         setTicketForm({ ...emptyTicketForm, customer_id: previewCustomerId });
         setCustomerForm(emptyCustomerForm);
-        setNotice("Preview repair ticket added locally.");
+        setNotice(
+          `Preview repair ticket ${ticket.ticket_number} added and selected for assignment.`,
+        );
         return;
       }
 
@@ -875,11 +887,10 @@ export function RepairsPage() {
         accessories_received: splitList(ticketForm.accessories_received),
         intake_images: [],
       });
-      setTickets((current) => [ticket, ...current]);
-      setSelectedTicketId(ticket.id);
+      revealTicket(ticket);
       setTicketForm({ ...emptyTicketForm, customer_id: customerId });
       setCustomerForm(emptyCustomerForm);
-      setNotice(`Created repair ticket ${ticket.ticket_number}.`);
+      setNotice(`Created repair ticket ${ticket.ticket_number} and selected it for assignment.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not create repair ticket.");
     } finally {
@@ -2386,6 +2397,24 @@ export function RepairsPage() {
           </div>
         </header>
         <table className="data-table repair-queue-table">
+          {selectedTicketHiddenByFilters && (
+            <caption className="repair-queue-filter-note">
+              <span>
+                Selected ticket {selectedTicket?.ticket_number} is hidden by the
+                current search or status filter.
+              </span>
+              <button
+                className="secondary-button"
+                onClick={() => {
+                  setTicketSearch("");
+                  setStatusFilter("all");
+                }}
+                type="button"
+              >
+                Show Selected Ticket
+              </button>
+            </caption>
+          )}
           <thead>
             <tr>
               <th>Ticket</th>

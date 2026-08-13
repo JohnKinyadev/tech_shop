@@ -1916,6 +1916,23 @@ button:disabled {
   justify-content: flex-end;
 }
 
+.repair-queue-filter-note {
+  caption-side: top;
+  margin-bottom: 10px;
+  padding: 10px;
+  border: 1px solid #b9d8f0;
+  border-radius: var(--radius);
+  background: #f4f9fd;
+  text-align: left;
+}
+
+.repair-queue-filter-note span {
+  display: inline-block;
+  margin-right: 10px;
+  color: var(--muted);
+  font-weight: 700;
+}
+
 .pipeline-column {
   border: 0;
   color: var(--text);
