@@ -1192,13 +1192,13 @@ export function InventoryPage() {
         <section className="panel-card">
           <header className="panel-card__header">
             <div>
-              <p className="eyebrow">Controls</p>
-              <h2>Stock operations</h2>
+              <p className="eyebrow">Stock control</p>
+              <h2>Adjust or transfer stock</h2>
             </div>
           </header>
 
           <form className="form-panel" onSubmit={handleRequestAdjustment}>
-            <strong>Adjustment request</strong>
+            <strong>Request stock correction</strong>
             {selectedAdjustmentBalance && (
               <div className="stock-action-context">
                 <span>{balanceLabel(selectedAdjustmentBalance)}</span>
@@ -1256,7 +1256,7 @@ export function InventoryPage() {
                 </select>
               </label>
               <label>
-                Quantity delta
+                Quantity change
                 <input
                   type="number"
                   value={adjustmentForm.quantity_delta}
@@ -1285,13 +1285,13 @@ export function InventoryPage() {
             </label>
             <div className="form-footer">
               <button className="primary-button" disabled={busy}>
-                Request Adjustment
+                Request Stock Correction
               </button>
             </div>
           </form>
 
           <form className="form-panel form-panel--bordered" onSubmit={handleCreateTransfer}>
-            <strong>Branch transfer</strong>
+            <strong>Request branch transfer</strong>
             {selectedTransferBalance && (
               <div className="stock-action-context">
                 <span>{balanceLabel(selectedTransferBalance)}</span>
@@ -1405,7 +1405,7 @@ export function InventoryPage() {
             </div>
             <div className="form-footer">
               <button className="secondary-button" disabled={busy}>
-                Create Transfer
+                Request Branch Transfer
               </button>
             </div>
           </form>
@@ -1414,8 +1414,8 @@ export function InventoryPage() {
         <section className="panel-card">
           <header className="panel-card__header">
             <div>
-              <p className="eyebrow">Counts & workflow</p>
-              <h2>{selectedCount?.count_number ?? "Stock count"}</h2>
+              <p className="eyebrow">Stocktake</p>
+              <h2>{selectedCount?.count_number ?? "Stock counts"}</h2>
             </div>
           </header>
 
@@ -1430,7 +1430,7 @@ export function InventoryPage() {
                 </div>
               )}
               <label>
-                Count item
+                Item to count
                 <select
                   value={countForm.stock_balance_id}
                   onChange={(event) =>
@@ -1448,7 +1448,7 @@ export function InventoryPage() {
                 </select>
               </label>
               <label>
-                Count notes
+                Stocktake notes
                 <textarea
                   value={countForm.notes}
                   onChange={(event) =>
@@ -1461,7 +1461,7 @@ export function InventoryPage() {
                 />
               </label>
               <button className="primary-button" disabled={busy}>
-                Create Stock Count
+                Start Stock Count
               </button>
             </form>
 
@@ -1523,7 +1523,7 @@ export function InventoryPage() {
                   </label>
                   <div className="form-grid form-grid--two">
                     <label>
-                      Counted quantity
+                      Physical quantity counted
                       <input
                         type="number"
                         min="0"
@@ -1537,7 +1537,7 @@ export function InventoryPage() {
                       />
                     </label>
                     <label>
-                      Line note
+                      Count note
                       <input
                         value={countItemForm.notes}
                         onChange={(event) =>
@@ -1550,12 +1550,12 @@ export function InventoryPage() {
                     </label>
                   </div>
                   <button className="secondary-button" disabled={busy}>
-                    Save Count Line
+                    Save Counted Quantity
                   </button>
                 </form>
 
                 <div className="action-form">
-                  <label>Count approval flow</label>
+                  <label>Stock count approval</label>
                   <div className="table-actions">
                     <button
                       className="secondary-button"
@@ -1563,7 +1563,7 @@ export function InventoryPage() {
                       onClick={() => void handleCountAction("submit")}
                       type="button"
                     >
-                      Submit
+                      Submit Count for Approval
                     </button>
                     <button
                       className="secondary-button"
@@ -1571,7 +1571,7 @@ export function InventoryPage() {
                       onClick={() => void handleCountAction("approve")}
                       type="button"
                     >
-                      Approve
+                      Approve Stock Count
                     </button>
                     <button
                       className="secondary-button"
@@ -1582,7 +1582,7 @@ export function InventoryPage() {
                       onClick={() => void handleCountAction("cancel")}
                       type="button"
                     >
-                      Cancel
+                      Cancel Stock Count
                     </button>
                   </div>
                 </div>
