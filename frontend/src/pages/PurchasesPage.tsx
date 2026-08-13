@@ -514,7 +514,7 @@ export function PurchasesPage() {
 
       setNotice(
         failed
-          ? "Purchasing API unavailable or not permitted. Showing sample data where needed."
+          ? "Purchasing API is unavailable or not permitted. Local preview data remains visible where needed."
           : null,
       );
     });

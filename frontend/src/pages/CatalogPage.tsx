@@ -529,7 +529,7 @@ export function CatalogPage() {
 
       setNotice(
         failed
-          ? "Catalog API unavailable or not permitted. Sample data remains visible where needed."
+          ? "Catalog API is unavailable or not permitted. Local preview data remains visible where needed."
           : null,
       );
     });

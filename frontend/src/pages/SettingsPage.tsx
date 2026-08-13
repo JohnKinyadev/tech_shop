@@ -307,7 +307,7 @@ export function SettingsPage() {
       })
       .catch(() => {
         if (!active) return;
-        setNotice("Branch settings are unavailable or not permitted. Showing sample data.");
+        setNotice("Branch settings are unavailable or not permitted. Local preview data remains visible.");
       });
 
     return () => {
@@ -339,7 +339,7 @@ export function SettingsPage() {
       })
       .catch(() => {
         if (!active) return;
-        setNotice("Till setup is unavailable or not permitted. Showing sample tills.");
+        setNotice("Till setup is unavailable or not permitted. Local preview tills remain visible.");
       });
 
     return () => {

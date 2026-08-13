@@ -296,7 +296,7 @@ export function InventoryPage() {
       })
       .catch(() => {
         if (!active) return;
-        setNotice("Branches are unavailable. Sample branch data remains visible.");
+        setNotice("Branches are unavailable. Local branch preview data remains visible.");
       });
 
     return () => {
@@ -411,7 +411,7 @@ export function InventoryPage() {
 
         setNotice(
           failed
-            ? "Some inventory operations are unavailable or not permitted. Sample data remains visible where needed."
+            ? "Some inventory operations are unavailable or not permitted. Local preview data remains visible where needed."
             : null,
         );
       },

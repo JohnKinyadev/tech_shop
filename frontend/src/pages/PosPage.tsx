@@ -215,7 +215,7 @@ export function PosPage() {
         setCatalogLive(true);
       } else {
         setCatalogLive(false);
-        setNotice("Catalog unavailable. Showing local sample products.");
+        setNotice("Catalog is unavailable. Local preview products remain visible.");
       }
 
       if (tillResult.status === "fulfilled") {

@@ -346,7 +346,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     if (isPreview) {
       setSummary(demoDashboard);
       setLoaded({ sales: true, inventory: true, repairs: true, expenses: true });
-      setNotice("Preview mode is using sample dashboard data.");
+      setNotice("Preview mode is using local dashboard data.");
       return;
     }
     if (!token) return;

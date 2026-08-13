@@ -479,12 +479,16 @@ button:disabled {
   color: var(--muted);
 }
 
+.erp-app--pos .workspace-context-bar {
+  display: none;
+}
+
 .erp-workspace {
   padding: 18px;
 }
 
 .erp-workspace--pos {
-  height: calc(100dvh - 177px);
+  height: calc(100dvh - 111px);
   min-height: 0;
   overflow: hidden;
   padding: 0;

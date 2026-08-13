@@ -465,7 +465,7 @@ export function RepairsPage() {
         failed = true;
       }
 
-        setNotice(failed ? "Some repair reference data is unavailable. Sample data remains visible where needed." : null);
+        setNotice(failed ? "Some repair reference data is unavailable. Local preview data remains visible where needed." : null);
     });
 
     return () => {
@@ -497,7 +497,7 @@ export function RepairsPage() {
         failed = true;
       }
 
-      setNotice(failed ? "Repairs API unavailable or not permitted. Showing sample data where needed." : null);
+      setNotice(failed ? "Repairs API is unavailable or not permitted. Local preview data remains visible where needed." : null);
     });
 
     return () => {

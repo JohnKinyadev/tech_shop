@@ -487,7 +487,7 @@ export function ReportsPage() {
       })
       .catch(() => {
         if (!active) return;
-        setNotice("Branches are unavailable. Report filters will use sample branches.");
+        setNotice("Branches are unavailable. Report filters will use local preview branches.");
       });
 
     return () => {
@@ -541,7 +541,7 @@ export function ReportsPage() {
 
       setNotice(
         failed
-          ? "Some reports are unavailable or not permitted. Showing sample data where needed."
+          ? "Some reports are unavailable or not permitted. Local preview data remains visible where needed."
           : null,
       );
     });

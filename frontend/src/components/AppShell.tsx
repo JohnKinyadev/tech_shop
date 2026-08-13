@@ -172,7 +172,7 @@ export function AppShell({
   }
 
   return (
-    <div className="erp-app">
+    <div className={`erp-app erp-app--${activeView}`}>
       <header className="erp-topbar">
         <div className="erp-topbar__brand">
           <BrandMark />

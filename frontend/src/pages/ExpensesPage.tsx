@@ -292,7 +292,7 @@ export function ExpensesPage() {
 
         setNotice(
           failed
-            ? "Some expense setup data is unavailable or not permitted. Sample data remains visible."
+            ? "Some expense setup data is unavailable or not permitted. Local preview data remains visible."
             : null,
         );
       },
@@ -321,7 +321,7 @@ export function ExpensesPage() {
       })
       .catch(() => {
         if (!active) return;
-        setNotice("Expenses are unavailable or not permitted. Showing sample data.");
+        setNotice("Expenses are unavailable or not permitted. Local preview data remains visible.");
       });
 
     return () => {
