@@ -105,6 +105,37 @@ function readableDate(value: string) {
   return new Intl.DateTimeFormat("en-KE", { dateStyle: "medium" }).format(date);
 }
 
+type CsvRow = Array<string | number | null | undefined>;
+
+function csvCell(value: string | number | null | undefined) {
+  const text = String(value ?? "").replace(/\r?\n/g, " ").trim();
+  if (/[",]/.test(text)) {
+    return `"${text.replace(/"/g, '""')}"`;
+  }
+  return text;
+}
+
+function safeFilePart(value: string) {
+  return value
+    .toLowerCase()
+    .trim()
+    .replace(/[^a-z0-9]+/g, "-")
+    .replace(/^-+|-+$/g, "");
+}
+
+function downloadCsv(filename: string, rows: CsvRow[]) {
+  const csv = rows.map((row) => row.map(csvCell).join(",")).join("\n");
+  const blob = new Blob([csv], { type: "text/csv;charset=utf-8;" });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = filename;
+  document.body.appendChild(link);
+  link.click();
+  link.remove();
+  URL.revokeObjectURL(url);
+}
+
 export function ReportsPage() {
   const { token, isPreview, user } = useAuth();
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
@@ -196,7 +227,7 @@ export function ReportsPage() {
         "Selected branch";
   const periodLabel =
     startDate && endDate
-      ? `${readableDate(startDate)} — ${readableDate(endDate)}`
+      ? `${readableDate(startDate)} to ${readableDate(endDate)}`
       : startDate
         ? `From ${readableDate(startDate)}`
         : endDate
@@ -471,6 +502,107 @@ export function ReportsPage() {
     setEndDate(range.end);
   }
 
+  function handleCsvExport() {
+    const generatedAt = new Date().toISOString();
+    const rows: CsvRow[] = [
+      ["Crystal-shop report export"],
+      ["Branch", branchLabel],
+      ["Period", periodLabel],
+      ["Generated at", generatedAt],
+      [],
+      ["Summary", "Value", "Detail"],
+      ["Business health", `${businessHealthScore}%`, businessHealthLabel],
+      ["Gross sales", sales.gross_sales, `${sales.sale_count} sale(s)`],
+      ["Net sales", sales.net_sales, `${sales.item_count} item(s)`],
+      ["Repair payments", repairs.payment_total, `${repairs.ticket_count} ticket(s)`],
+      [
+        "Approved expenses",
+        expenses.total_approved_expenses,
+        `${expenses.approved_expense_count} record(s)`,
+      ],
+      [
+        "Cash after expenses",
+        cashAfterExpenses,
+        "Net sales + repair payments - approved expenses",
+      ],
+      ["Low stock items", inventory.low_stock_count, "Items at or below reorder level"],
+      ["Pending expenses", expenses.pending_expense_count, "Awaiting approval"],
+      [],
+      ["Decision queue", "Owner", "Detail", "Tone"],
+      ...actionQueue.map((item) => [item.label, item.owner, item.detail, item.tone]),
+      [],
+      ["Payment mix", "Transactions", "Amount", "Share of paid amount"],
+      ...sales.payments.map((payment) => [
+        titleize(payment.method),
+        payment.transaction_count,
+        payment.amount,
+        `${percentage(payment.amount, sales.paid_amount)}%`,
+      ]),
+      [],
+      [
+        "Top-selling items",
+        "Variant",
+        "SKU",
+        "Quantity",
+        "Revenue",
+        "Gross profit",
+        "Margin",
+      ],
+      ...sales.top_items.map((item) => [
+        item.product_name,
+        item.variant_name,
+        item.sku,
+        item.quantity_sold,
+        item.revenue,
+        item.gross_profit,
+        `${marginPercent(item.gross_profit, item.revenue)}%`,
+      ]),
+      [],
+      [
+        "Low-stock watch",
+        "Variant",
+        "SKU",
+        "On hand",
+        "Available",
+        "Reorder level",
+        "Shortage",
+        "Stock value",
+      ],
+      ...inventory.low_stock_items.map((item) => [
+        item.product_name,
+        item.variant_name,
+        item.sku,
+        item.quantity_on_hand,
+        item.available_quantity,
+        item.reorder_level,
+        Math.max(0, item.reorder_level - item.available_quantity),
+        item.stock_value,
+      ]),
+      [],
+      ["Repair pipeline", "Tickets", "Share of queue"],
+      ...repairs.status_breakdown.map((item) => [
+        titleize(item.status),
+        item.ticket_count,
+        `${percentage(item.ticket_count, repairs.ticket_count)}%`,
+      ]),
+      [],
+      ["Expense categories", "Entries", "Amount", "Share of approved expenses"],
+      ...expenses.by_category.map((category) => [
+        category.category_name,
+        category.expense_count,
+        category.amount,
+        `${percentage(category.amount, expenses.total_approved_expenses)}%`,
+      ]),
+    ];
+
+    const fileBranch = safeFilePart(branchLabel || "all-branches") || "all-branches";
+    const filePeriod =
+      startDate || endDate
+        ? `${startDate || "start"}-${endDate || "end"}`
+        : "all-dates";
+    downloadCsv(`crystal-shop-report-${fileBranch}-${filePeriod}.csv`, rows);
+  }
+
   useEffect(() => {
     if (!token || isPreview) return;
 
@@ -562,9 +694,14 @@ export function ReportsPage() {
             expenses from one branch-aware business view.
           </p>
         </div>
-        <button className="primary-button" onClick={() => window.print()}>
-          Print / Export
-        </button>
+        <div className="table-actions">
+          <button className="secondary-button" type="button" onClick={handleCsvExport}>
+            Download CSV
+          </button>
+          <button className="primary-button" type="button" onClick={() => window.print()}>
+            Print Report
+          </button>
+        </div>
       </div>
 
       <section className="panel-card report-filter-bar">
