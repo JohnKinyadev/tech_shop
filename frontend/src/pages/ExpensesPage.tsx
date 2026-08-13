@@ -52,6 +52,104 @@ function amountTotal(expenses: Expense[], status?: string) {
     .reduce((sum, expense) => sum + Number(expense.amount), 0);
 }
 
+function numberValue(value: number | string | null | undefined) {
+  const amount = Number(value ?? 0);
+  return Number.isFinite(amount) ? amount : 0;
+}
+
+function optionalText(value: string) {
+  const trimmed = value.trim();
+  return trimmed ? trimmed : null;
+}
+
+function needsReference(method: ExpensePaymentMethod) {
+  return ["mpesa", "card", "bank_transfer"].includes(method);
+}
+
+function referenceLabel(method: ExpensePaymentMethod) {
+  if (method === "mpesa") return "M-Pesa transaction code";
+  if (method === "card") return "card authorization/reference";
+  if (method === "bank_transfer") return "bank transfer reference";
+  return "receipt reference";
+}
+
+function paymentMethodHelp(method: ExpensePaymentMethod) {
+  if (method === "cash") return "Cash payments can be submitted with an optional receipt number.";
+  if (method === "store_credit") return "Store credit entries should include enough notes for audit context.";
+  return `Add the ${referenceLabel(method)} before approval.`;
+}
+
+function amountBand(amount: number) {
+  if (amount <= 0) return "Waiting for amount";
+  if (amount >= 50000) return "Owner visibility";
+  if (amount >= 10000) return "Manager review";
+  return "Routine cost";
+}
+
+function expenseFormIssue(
+  form: typeof emptyExpenseForm,
+  branches: Branch[],
+  categories: ExpenseCategory[],
+) {
+  const amount = numberValue(form.amount);
+  if (!form.branch_id) return "Choose the branch that incurred this cost.";
+  if (!branches.some((branch) => branch.id === form.branch_id)) {
+    return "Choose a valid branch for this expense.";
+  }
+  if (!form.category_id) return "Choose the expense category.";
+  if (!categories.some((category) => category.id === form.category_id)) {
+    return "Choose a valid category for this expense.";
+  }
+  if (form.description.trim().length < 3) {
+    return "Describe the expense clearly enough for approval.";
+  }
+  if (!amount || amount <= 0) return "Expense amount must be greater than zero.";
+  if (needsReference(form.payment_method) && !form.reference_number.trim()) {
+    return `${referenceLabel(form.payment_method)} is required for ${titleize(
+      form.payment_method,
+    )} expenses.`;
+  }
+  return null;
+}
+
+function categoryFormIssue(
+  form: typeof emptyCategoryForm,
+  categories: ExpenseCategory[],
+) {
+  const name = form.name.trim();
+  if (!name) return "Category name is required.";
+  if (
+    categories.some(
+      (category) => category.name.trim().toLowerCase() === name.toLowerCase(),
+    )
+  ) {
+    return "A category with this name already exists.";
+  }
+  return null;
+}
+
+function expenseDecisionIssue(
+  expense: Expense | undefined,
+  action: "approve" | "reject" | "cancel",
+  notes: string,
+) {
+  if (!expense) return "Select an expense first.";
+  if (expense.status !== "pending") {
+    return "Only pending expenses can be approved, rejected, or cancelled.";
+  }
+  if (
+    action === "approve" &&
+    needsReference(expense.payment_method) &&
+    !expense.reference_number?.trim()
+  ) {
+    return `Add the ${referenceLabel(expense.payment_method)} before approval.`;
+  }
+  if (action !== "approve" && notes.trim().length < 3) {
+    return "Rejecting or cancelling needs a short reason for the audit trail.";
+  }
+  return null;
+}
+
 export function ExpensesPage() {
   const { token, isPreview, user } = useAuth();
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
@@ -134,6 +232,27 @@ export function ExpensesPage() {
         .sort((left, right) => right.amount - left.amount),
     [categories, visibleExpenses],
   );
+
+  const highestCategory = categoryTotals[0];
+  const pendingCount = pendingExpenses.length;
+  const pendingAverage = pendingCount ? totals.pending / pendingCount : 0;
+  const selectedExpenseAmount = numberValue(selectedExpense?.amount);
+  const createAmount = numberValue(expenseForm.amount);
+  const createExpenseIssue = expenseFormIssue(expenseForm, branches, categories);
+  const editExpenseIssue = selectedExpense
+    ? expenseFormIssue(editForm, branches, categories)
+    : "Select an expense first.";
+  const quickCategoryIssue = categoryFormIssue(categoryForm, categories);
+  const approveIssue = expenseDecisionIssue(selectedExpense, "approve", decisionNotes);
+  const rejectIssue = expenseDecisionIssue(selectedExpense, "reject", decisionNotes);
+  const cancelIssue = expenseDecisionIssue(selectedExpense, "cancel", decisionNotes);
+  const selectedExpenseCanEdit = selectedExpense?.status === "pending";
+  const selectedReferenceIssue =
+    selectedExpense &&
+    needsReference(selectedExpense.payment_method) &&
+    !selectedExpense.reference_number?.trim()
+      ? `Missing ${referenceLabel(selectedExpense.payment_method)}`
+      : null;
 
   useEffect(() => {
     if (!token || isPreview) return;
@@ -246,10 +365,12 @@ export function ExpensesPage() {
 
   async function handleCreateCategory(event: FormEvent) {
     event.preventDefault();
-    if (!categoryForm.name.trim()) {
-      setNotice("Category name is required.");
+    if (quickCategoryIssue) {
+      setNotice(quickCategoryIssue);
       return;
     }
+    const name = categoryForm.name.trim();
+    const description = optionalText(categoryForm.description);
 
     setBusy(true);
     try {
@@ -259,8 +380,8 @@ export function ExpensesPage() {
           created_at: new Date().toISOString(),
           updated_at: new Date().toISOString(),
           is_deleted: false,
-          name: categoryForm.name.trim(),
-          description: categoryForm.description || null,
+          name,
+          description,
         };
         setCategories((current) => [category, ...current]);
         setExpenseForm((current) => ({ ...current, category_id: category.id }));
@@ -270,8 +391,8 @@ export function ExpensesPage() {
       }
 
       const category = await createExpenseCategory(token, {
-        name: categoryForm.name.trim(),
-        description: categoryForm.description || null,
+        name,
+        description,
       });
       setCategories((current) => [category, ...current]);
       setExpenseForm((current) => ({ ...current, category_id: category.id }));
@@ -286,19 +407,14 @@ export function ExpensesPage() {
 
   async function handleCreateExpense(event: FormEvent) {
     event.preventDefault();
-    const amount = Number(expenseForm.amount);
-    if (!expenseForm.branch_id || !expenseForm.category_id) {
-      setNotice("Branch and category are required.");
+    if (createExpenseIssue) {
+      setNotice(createExpenseIssue);
       return;
     }
-    if (!expenseForm.description.trim()) {
-      setNotice("Expense description is required.");
-      return;
-    }
-    if (!amount || amount <= 0) {
-      setNotice("Expense amount must be greater than zero.");
-      return;
-    }
+    const amount = numberValue(expenseForm.amount);
+    const description = expenseForm.description.trim();
+    const referenceNumber = optionalText(expenseForm.reference_number);
+    const notes = optionalText(expenseForm.notes);
 
     setBusy(true);
     try {
@@ -312,12 +428,12 @@ export function ExpensesPage() {
           category_id: expenseForm.category_id,
           submitted_by_id: user?.id ?? "preview-user",
           approved_by_id: null,
-          description: expenseForm.description.trim(),
+          description,
           amount: String(amount),
           payment_method: expenseForm.payment_method,
           status: "pending",
-          reference_number: expenseForm.reference_number || null,
-          notes: expenseForm.notes || null,
+          reference_number: referenceNumber,
+          notes,
         };
         upsertExpense(expense);
         setExpenseForm((current) => ({
@@ -333,11 +449,11 @@ export function ExpensesPage() {
       const expense = await createExpense(token, {
         branch_id: expenseForm.branch_id,
         category_id: expenseForm.category_id,
-        description: expenseForm.description.trim(),
+        description,
         amount,
         payment_method: expenseForm.payment_method,
-        reference_number: expenseForm.reference_number || null,
-        notes: expenseForm.notes || null,
+        reference_number: referenceNumber,
+        notes,
       });
       upsertExpense(expense);
       setExpenseForm((current) => ({
@@ -364,11 +480,14 @@ export function ExpensesPage() {
       setNotice("Only pending expenses can be edited.");
       return;
     }
-    const amount = Number(editForm.amount);
-    if (!editForm.description.trim() || !amount || amount <= 0) {
-      setNotice("Description and valid amount are required.");
+    if (editExpenseIssue) {
+      setNotice(editExpenseIssue);
       return;
     }
+    const amount = numberValue(editForm.amount);
+    const description = editForm.description.trim();
+    const referenceNumber = optionalText(editForm.reference_number);
+    const notes = optionalText(editForm.notes);
 
     setBusy(true);
     try {
@@ -377,11 +496,11 @@ export function ExpensesPage() {
           ...selectedExpense,
           updated_at: new Date().toISOString(),
           category_id: editForm.category_id,
-          description: editForm.description.trim(),
+          description,
           amount: String(amount),
           payment_method: editForm.payment_method,
-          reference_number: editForm.reference_number || null,
-          notes: editForm.notes || null,
+          reference_number: referenceNumber,
+          notes,
         });
         setNotice("Preview expense updated locally.");
         return;
@@ -389,11 +508,11 @@ export function ExpensesPage() {
 
       const expense = await updateExpense(token, selectedExpense.id, {
         category_id: editForm.category_id,
-        description: editForm.description.trim(),
+        description,
         amount,
         payment_method: editForm.payment_method,
-        reference_number: editForm.reference_number || null,
-        notes: editForm.notes || null,
+        reference_number: referenceNumber,
+        notes,
       });
       upsertExpense(expense);
       setNotice(`Updated expense ${expense.description}.`);
@@ -405,14 +524,13 @@ export function ExpensesPage() {
   }
 
   async function handleDecision(action: "approve" | "reject" | "cancel") {
-    if (!selectedExpense) {
-      setNotice("Select an expense first.");
+    const decisionIssue = expenseDecisionIssue(selectedExpense, action, decisionNotes);
+    if (decisionIssue) {
+      setNotice(decisionIssue);
       return;
     }
-    if (selectedExpense.status !== "pending") {
-      setNotice("Only pending expenses can be approved, rejected, or cancelled.");
-      return;
-    }
+    if (!selectedExpense) return;
+    const notes = optionalText(decisionNotes);
 
     setBusy(true);
     try {
@@ -428,14 +546,14 @@ export function ExpensesPage() {
           updated_at: new Date().toISOString(),
           status: nextStatus,
           approved_by_id: action === "approve" ? user?.id ?? "preview-manager" : null,
-          notes: decisionNotes || selectedExpense.notes,
+          notes: notes ?? selectedExpense.notes,
         });
         setNotice(`Preview expense ${nextStatus}.`);
         return;
       }
 
       const expense = await decideExpense(token, selectedExpense.id, action, {
-        notes: decisionNotes || null,
+        notes,
       });
       upsertExpense(expense);
       setNotice(`Expense ${titleize(expense.status)}.`);
@@ -457,8 +575,8 @@ export function ExpensesPage() {
             before they affect owner reports.
           </p>
         </div>
-        <StatusPill tone={pendingExpenses.length ? "warning" : "success"}>
-          {integer(pendingExpenses.length)} pending approval
+        <StatusPill tone={pendingCount ? "warning" : "success"}>
+          {integer(pendingCount)} pending approval
         </StatusPill>
       </div>
 
@@ -533,6 +651,37 @@ export function ExpensesPage() {
         </label>
       </section>
 
+      <section className="expense-control-strip m-t">
+        <article>
+          <span>Approval load</span>
+          <strong>{pendingCount ? `${integer(pendingCount)} waiting` : "Clear"}</strong>
+          <small>
+            {pendingCount
+              ? `${money(totals.pending)} queued for review`
+              : "No operating cost is waiting in this view."}
+          </small>
+        </article>
+        <article>
+          <span>Average pending</span>
+          <strong>{money(pendingAverage)}</strong>
+          <small>Useful for spotting a queue full of unusually large entries.</small>
+        </article>
+        <article>
+          <span>Largest category</span>
+          <strong>{highestCategory?.category.name ?? "No spend yet"}</strong>
+          <small>
+            {highestCategory
+              ? `${money(highestCategory.amount)} across ${integer(highestCategory.count)} entry(s)`
+              : "Category pressure appears once expenses are submitted."}
+          </small>
+        </article>
+        <article>
+          <span>Approval rule</span>
+          <strong>Proof before booking</strong>
+          <small>M-Pesa, card, and bank transfer costs need a reference.</small>
+        </article>
+      </section>
+
       <div className="expense-desk m-t">
         <section className="panel-card">
           <header className="panel-card__header panel-card__header--compact">
@@ -548,7 +697,7 @@ export function ExpensesPage() {
           </header>
           {selectedExpense ? (
             <div className="expense-focus-card">
-              <strong>{money(selectedExpense.amount)}</strong>
+              <strong>{money(selectedExpenseAmount)}</strong>
               <span>
                 {categoryName(selectedExpense.category_id)} ·{" "}
                 {branchName(selectedExpense.branch_id)}
@@ -559,7 +708,15 @@ export function ExpensesPage() {
               </div>
               <div>
                 <span>Reference</span>
-                <b>{selectedExpense.reference_number ?? "Not set"}</b>
+                <b>{selectedExpense.reference_number ?? selectedReferenceIssue ?? "Optional"}</b>
+              </div>
+              <div>
+                <span>Submitted</span>
+                <b>{dateLabel(selectedExpense.created_at)}</b>
+              </div>
+              <div>
+                <span>Last updated</span>
+                <b>{dateLabel(selectedExpense.updated_at)}</b>
               </div>
               <p>{selectedExpense.notes || "No notes recorded."}</p>
             </div>
@@ -585,7 +742,10 @@ export function ExpensesPage() {
                 >
                   <strong>{money(expense.amount)}</strong>
                   <span>{expense.description}</span>
-                  <small>{categoryName(expense.category_id)}</small>
+                  <small>
+                    {categoryName(expense.category_id)} · {branchName(expense.branch_id)}
+                  </small>
+                  <em>{dateLabel(expense.created_at)}</em>
                 </button>
               ))
             ) : (
@@ -709,8 +869,14 @@ export function ExpensesPage() {
                       reference_number: event.target.value,
                     }))
                   }
-                  placeholder="Receipt, M-Pesa code..."
+                  placeholder={referenceLabel(expenseForm.payment_method)}
                 />
+                {needsReference(expenseForm.payment_method) &&
+                  !expenseForm.reference_number.trim() && (
+                    <span className="expense-field-warning">
+                      {paymentMethodHelp(expenseForm.payment_method)}
+                    </span>
+                  )}
               </label>
             </div>
             <label>
@@ -739,8 +905,52 @@ export function ExpensesPage() {
                 placeholder="Approval context or receipt details"
               />
             </label>
+            <div
+              className={`expense-readiness-card ${
+                createExpenseIssue ? "is-blocked" : "is-ready"
+              }`}
+            >
+              <div>
+                <span>Submission check</span>
+                <strong>
+                  {createExpenseIssue ? "Needs details" : "Ready for approval"}
+                </strong>
+              </div>
+              <div className="expense-readiness-grid">
+                <article>
+                  <span>Branch</span>
+                  <b>{expenseForm.branch_id ? branchName(expenseForm.branch_id) : "Missing"}</b>
+                </article>
+                <article>
+                  <span>Category</span>
+                  <b>
+                    {expenseForm.category_id
+                      ? categoryName(expenseForm.category_id)
+                      : "Missing"}
+                  </b>
+                </article>
+                <article>
+                  <span>Amount band</span>
+                  <b>{amountBand(createAmount)}</b>
+                </article>
+                <article>
+                  <span>Reference</span>
+                  <b>
+                    {needsReference(expenseForm.payment_method)
+                      ? expenseForm.reference_number.trim()
+                        ? "Captured"
+                        : "Required"
+                      : "Optional"}
+                  </b>
+                </article>
+              </div>
+              <small>
+                {createExpenseIssue ??
+                  "This will enter the approval queue before affecting reports."}
+              </small>
+            </div>
             <div className="form-footer">
-              <button className="primary-button" disabled={busy}>
+              <button className="primary-button" disabled={busy || Boolean(createExpenseIssue)}>
                 Submit Expense
               </button>
             </div>
@@ -761,6 +971,9 @@ export function ExpensesPage() {
                   }
                   placeholder="Utilities"
                 />
+                {categoryForm.name.trim() && quickCategoryIssue && (
+                  <span className="expense-field-warning">{quickCategoryIssue}</span>
+                )}
               </label>
               <label>
                 Description
@@ -777,7 +990,7 @@ export function ExpensesPage() {
               </label>
             </div>
             <div className="form-footer">
-              <button className="secondary-button" disabled={busy}>
+              <button className="secondary-button" disabled={busy || Boolean(quickCategoryIssue)}>
                 Add Category
               </button>
             </div>
@@ -795,13 +1008,53 @@ export function ExpensesPage() {
           <div className="ticket-action-panel">
             {selectedExpense ? (
               <>
+                <div
+                  className={`expense-decision-card ${
+                    selectedExpenseCanEdit && !approveIssue ? "is-ready" : "is-blocked"
+                  }`}
+                >
+                  <div>
+                    <span>Approval posture</span>
+                    <strong>
+                      {selectedExpenseCanEdit
+                        ? approveIssue
+                          ? "Needs review"
+                          : "Can approve"
+                        : titleize(selectedExpense.status)}
+                    </strong>
+                  </div>
+                  <div className="expense-readiness-grid">
+                    <article>
+                      <span>Amount</span>
+                      <b>{money(selectedExpenseAmount)}</b>
+                    </article>
+                    <article>
+                      <span>Method</span>
+                      <b>{titleize(selectedExpense.payment_method)}</b>
+                    </article>
+                    <article>
+                      <span>Reference</span>
+                      <b>{selectedReferenceIssue ?? "Clear"}</b>
+                    </article>
+                    <article>
+                      <span>Decision notes</span>
+                      <b>{decisionNotes.trim() ? "Captured" : "Optional for approval"}</b>
+                    </article>
+                  </div>
+                  <small>
+                    {selectedExpenseCanEdit
+                      ? approveIssue ??
+                        "Approval will book this expense into the reporting layer."
+                      : "This expense has already left the pending approval queue."}
+                  </small>
+                </div>
                 <form className="action-form" onSubmit={handleUpdateExpense}>
                   <strong>Edit pending expense</strong>
                   <label>
                     Description
                     <textarea
                       value={editForm.description}
-                      disabled={selectedExpense.status !== "pending"}
+                      disabled={!selectedExpenseCanEdit}
                       onChange={(event) =>
                         setEditForm((current) => ({
                           ...current,
@@ -815,7 +1068,7 @@ export function ExpensesPage() {
                       Category
                       <select
                         value={editForm.category_id}
-                        disabled={selectedExpense.status !== "pending"}
+                        disabled={!selectedExpenseCanEdit}
                         onChange={(event) =>
                           setEditForm((current) => ({
                             ...current,
@@ -836,7 +1089,7 @@ export function ExpensesPage() {
                         type="number"
                         min="1"
                         value={editForm.amount}
-                        disabled={selectedExpense.status !== "pending"}
+                        disabled={!selectedExpenseCanEdit}
                         onChange={(event) =>
                           setEditForm((current) => ({
                             ...current,
@@ -849,7 +1102,7 @@ export function ExpensesPage() {
                       Method
                       <select
                         value={editForm.payment_method}
-                        disabled={selectedExpense.status !== "pending"}
+                        disabled={!selectedExpenseCanEdit}
                         onChange={(event) =>
                           setEditForm((current) => ({
                             ...current,
@@ -868,19 +1121,44 @@ export function ExpensesPage() {
                       Reference
                       <input
                         value={editForm.reference_number}
-                        disabled={selectedExpense.status !== "pending"}
+                        disabled={!selectedExpenseCanEdit}
                         onChange={(event) =>
                           setEditForm((current) => ({
                             ...current,
                             reference_number: event.target.value,
                           }))
                         }
+                        placeholder={referenceLabel(editForm.payment_method)}
                       />
+                      {selectedExpenseCanEdit &&
+                        needsReference(editForm.payment_method) &&
+                        !editForm.reference_number.trim() && (
+                          <span className="expense-field-warning">
+                            {paymentMethodHelp(editForm.payment_method)}
+                          </span>
+                        )}
                     </label>
                   </div>
+                  <label>
+                    Internal notes
+                    <textarea
+                      value={editForm.notes}
+                      disabled={!selectedExpenseCanEdit}
+                      onChange={(event) =>
+                        setEditForm((current) => ({
+                          ...current,
+                          notes: event.target.value,
+                        }))
+                      }
+                      placeholder="Receipt location, supplier note, or manager context"
+                    />
+                  </label>
+                  {selectedExpenseCanEdit && editExpenseIssue && (
+                    <span className="expense-field-warning">{editExpenseIssue}</span>
+                  )}
                   <button
                     className="secondary-button"
-                    disabled={busy || selectedExpense.status !== "pending"}
+                    disabled={busy || !selectedExpenseCanEdit || Boolean(editExpenseIssue)}
                   >
                     Save Pending Expense
                   </button>
@@ -892,15 +1170,20 @@ export function ExpensesPage() {
                     Decision notes
                     <textarea
                       value={decisionNotes}
-                      disabled={selectedExpense.status !== "pending"}
+                      disabled={!selectedExpenseCanEdit}
                       onChange={(event) => setDecisionNotes(event.target.value)}
                       placeholder="Approval, rejection, or cancellation note"
                     />
+                    {selectedExpenseCanEdit && (rejectIssue || cancelIssue) && (
+                      <span className="expense-field-warning">
+                        Add a short note before rejecting or cancelling this expense.
+                      </span>
+                    )}
                   </label>
                   <div className="table-actions">
                     <button
                       className="secondary-button"
-                      disabled={busy || selectedExpense.status !== "pending"}
+                      disabled={busy || Boolean(approveIssue)}
                       onClick={() => void handleDecision("approve")}
                       type="button"
                     >
@@ -908,7 +1191,7 @@ export function ExpensesPage() {
                     </button>
                     <button
                       className="secondary-button"
-                      disabled={busy || selectedExpense.status !== "pending"}
+                      disabled={busy || Boolean(rejectIssue)}
                       onClick={() => void handleDecision("reject")}
                       type="button"
                     >
@@ -916,7 +1199,7 @@ export function ExpensesPage() {
                     </button>
                     <button
                       className="secondary-button"
-                      disabled={busy || selectedExpense.status !== "pending"}
+                      disabled={busy || Boolean(cancelIssue)}
                       onClick={() => void handleDecision("cancel")}
                       type="button"
                     >

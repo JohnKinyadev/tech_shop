@@ -2269,6 +2269,38 @@ button:disabled {
   background: #fff;
 }
 
+.expense-control-strip {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 12px;
+}
+
+.expense-control-strip article {
+  display: grid;
+  gap: 6px;
+  padding: 13px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: linear-gradient(180deg, #fff, #f8fbfd);
+  box-shadow: var(--shadow);
+}
+
+.expense-control-strip span,
+.expense-control-strip small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.expense-control-strip span {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.expense-control-strip strong {
+  font-size: 18px;
+}
+
 .expense-desk {
   display: grid;
   grid-template-columns: minmax(0, 0.95fr) minmax(280px, 0.7fr) minmax(300px, 0.75fr);
@@ -2300,6 +2332,7 @@ button:disabled {
 .expense-focus-card p,
 .expense-pending-list span,
 .expense-pending-list small,
+.expense-pending-list em,
 .expense-category-list span {
   color: var(--muted);
   line-height: 1.45;
@@ -2325,9 +2358,87 @@ button:disabled {
   background: #f4f9fd;
 }
 
+.expense-pending-list em {
+  font-size: 12px;
+  font-style: normal;
+  font-weight: 700;
+}
+
 .expense-category-list article {
   grid-template-columns: minmax(0, 1fr) auto;
   align-items: center;
+}
+
+.expense-readiness-card,
+.expense-decision-card {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #f8fbfd;
+}
+
+.expense-readiness-card.is-ready,
+.expense-decision-card.is-ready {
+  border-color: rgba(47, 164, 109, 0.35);
+  background: #f4fbf7;
+}
+
+.expense-readiness-card.is-blocked,
+.expense-decision-card.is-blocked {
+  border-color: rgba(223, 138, 0, 0.28);
+  background: #fffaf1;
+}
+
+.expense-readiness-card > div:first-child,
+.expense-decision-card > div:first-child {
+  display: grid;
+  gap: 4px;
+}
+
+.expense-readiness-card span,
+.expense-readiness-card small,
+.expense-decision-card span,
+.expense-decision-card small {
+  color: var(--muted);
+  line-height: 1.45;
+}
+
+.expense-readiness-card > div:first-child span,
+.expense-decision-card > div:first-child span {
+  font-size: 12px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.expense-readiness-grid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.expense-readiness-grid article {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+  padding: 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: rgba(255, 255, 255, 0.78);
+}
+
+.expense-readiness-grid b {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.expense-field-warning {
+  color: #9b2d24;
+  font-size: 12px;
+  font-weight: 700;
+  line-height: 1.45;
 }
 
 .inventory-desk {
@@ -4203,6 +4314,19 @@ button:disabled {
   .settings-context-grid,
   .settings-admin-grid {
     grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expense-control-strip,
+  .expense-readiness-grid {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+  }
+
+  .expense-desk {
+    grid-template-columns: minmax(0, 1fr) minmax(280px, 0.8fr);
+  }
+
+  .expense-desk .panel-card:first-child {
+    grid-column: 1 / -1;
   }
 
   .role-rule-grid,
