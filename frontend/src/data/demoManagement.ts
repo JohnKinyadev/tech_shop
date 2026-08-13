@@ -276,6 +276,18 @@ export const demoDashboard: DashboardSummary = {
       { category_name: "Internet", expense_count: 1, amount: "2500" },
     ],
   },
+  approvals: {
+    branch_id: "demo-branch",
+    pending_expense_count: 2,
+    pending_stock_adjustment_count: 1,
+    pending_stock_transfer_count: 1,
+    pending_stock_count_count: 1,
+    pending_purchase_order_count: 1,
+    pending_sale_void_count: 1,
+    pending_sale_return_count: 1,
+    total_pending_count: 8,
+    latest_requested_at: new Date().toISOString(),
+  },
 };
 
 export const demoInventoryBalances: InventoryBalance[] = [

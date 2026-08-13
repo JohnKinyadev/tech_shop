@@ -7,20 +7,29 @@ from sqlalchemy import func, select
 from sqlalchemy.orm import Session
 
 from backend.core.permissions import ADMIN, TECHNICIAN
+from backend.models.approvals import ApprovalRequest
 from backend.models.branch import Branch
 from backend.models.enums import (
+    ApprovalStatus,
     PaymentDirection,
     PaymentStatus,
+    PurchaseStatus,
     RepairStatus,
     SaleStatus,
+    StockCountStatus,
+    TransferStatus,
 )
 from backend.models.expenses import Expense, ExpenseCategory
 from backend.models.inventory import StockBalance
+from backend.models.inventory_movement import StockTransfer
 from backend.models.payments import Payment
 from backend.models.products import Product, ProductVariant
+from backend.models.purchase import PurchaseOrder
 from backend.models.repairs import RepairPart, RepairTicket
 from backend.models.sales import Sale, SaleItem, SaleReturn
+from backend.models.stocktake import StockCount
 from backend.schemas.report_schemas import (
+    ApprovalSummaryResponse,
     DashboardSummaryResponse,
     ExpenseCategoryBreakdown,
     ExpenseSummaryResponse,
@@ -501,6 +510,129 @@ def expense_summary(
     )
 
 
+def _count_pending(db: Session, model, conditions: list) -> int:
+    return _int(db.scalar(select(func.count()).select_from(model).where(*conditions)))
+
+
+def _latest_created_at(db: Session, model, conditions: list):
+    return db.scalar(select(func.max(model.created_at)).where(*conditions))
+
+
+def approval_summary(
+    db: Session,
+    principal: AuthPrincipal,
+    *,
+    branch_id: UUID | None = None,
+) -> ApprovalSummaryResponse:
+    scoped_branch_id = _branch_id(db, principal, branch_id)
+
+    expense_conditions = [
+        Expense.is_deleted.is_(False),
+        Expense.status == "pending",
+    ]
+    approval_conditions = [
+        ApprovalRequest.is_deleted.is_(False),
+        ApprovalRequest.status == ApprovalStatus.PENDING,
+    ]
+    purchase_conditions = [
+        PurchaseOrder.is_deleted.is_(False),
+        PurchaseOrder.status == PurchaseStatus.SUBMITTED,
+    ]
+    stock_count_conditions = [
+        StockCount.is_deleted.is_(False),
+        StockCount.status == StockCountStatus.SUBMITTED,
+    ]
+    stock_transfer_conditions = [
+        StockTransfer.is_deleted.is_(False),
+        StockTransfer.status == TransferStatus.DRAFT,
+    ]
+    sale_return_conditions = [
+        SaleReturn.is_deleted.is_(False),
+        SaleReturn.status == "pending",
+        Sale.is_deleted.is_(False),
+    ]
+
+    if scoped_branch_id is not None:
+        expense_conditions.append(Expense.branch_id == scoped_branch_id)
+        approval_conditions.append(ApprovalRequest.branch_id == scoped_branch_id)
+        purchase_conditions.append(PurchaseOrder.branch_id == scoped_branch_id)
+        stock_count_conditions.append(StockCount.branch_id == scoped_branch_id)
+        stock_transfer_conditions.append(StockTransfer.source_branch_id == scoped_branch_id)
+        sale_return_conditions.append(Sale.branch_id == scoped_branch_id)
+
+    stock_adjustment_conditions = [
+        *approval_conditions,
+        ApprovalRequest.action == "inventory.adjust",
+    ]
+    sale_void_conditions = [
+        *approval_conditions,
+        ApprovalRequest.action == "sales.void",
+    ]
+
+    pending_expense_count = _count_pending(db, Expense, expense_conditions)
+    pending_stock_adjustment_count = _count_pending(
+        db, ApprovalRequest, stock_adjustment_conditions
+    )
+    pending_stock_transfer_count = _count_pending(
+        db, StockTransfer, stock_transfer_conditions
+    )
+    pending_stock_count_count = _count_pending(db, StockCount, stock_count_conditions)
+    pending_purchase_order_count = _count_pending(
+        db, PurchaseOrder, purchase_conditions
+    )
+    pending_sale_void_count = _count_pending(db, ApprovalRequest, sale_void_conditions)
+    pending_sale_return_count = _int(
+        db.scalar(
+            select(func.count())
+            .select_from(SaleReturn)
+            .join(Sale, Sale.id == SaleReturn.sale_id)
+            .where(*sale_return_conditions)
+        )
+    )
+
+    latest_sale_return_at = db.scalar(
+        select(func.max(SaleReturn.created_at))
+        .select_from(SaleReturn)
+        .join(Sale, Sale.id == SaleReturn.sale_id)
+        .where(*sale_return_conditions)
+    )
+    latest_values = [
+        _latest_created_at(db, Expense, expense_conditions),
+        _latest_created_at(db, ApprovalRequest, approval_conditions),
+        _latest_created_at(db, StockTransfer, stock_transfer_conditions),
+        _latest_created_at(db, StockCount, stock_count_conditions),
+        _latest_created_at(db, PurchaseOrder, purchase_conditions),
+        latest_sale_return_at,
+    ]
+    latest_requested_at = max(
+        (value for value in latest_values if value is not None),
+        default=None,
+    )
+
+    return ApprovalSummaryResponse(
+        branch_id=scoped_branch_id,
+        pending_expense_count=pending_expense_count,
+        pending_stock_adjustment_count=pending_stock_adjustment_count,
+        pending_stock_transfer_count=pending_stock_transfer_count,
+        pending_stock_count_count=pending_stock_count_count,
+        pending_purchase_order_count=pending_purchase_order_count,
+        pending_sale_void_count=pending_sale_void_count,
+        pending_sale_return_count=pending_sale_return_count,
+        total_pending_count=sum(
+            [
+                pending_expense_count,
+                pending_stock_adjustment_count,
+                pending_stock_transfer_count,
+                pending_stock_count_count,
+                pending_purchase_order_count,
+                pending_sale_void_count,
+                pending_sale_return_count,
+            ]
+        ),
+        latest_requested_at=latest_requested_at,
+    )
+
+
 def dashboard_summary(
     db: Session,
     principal: AuthPrincipal,
@@ -542,4 +674,5 @@ def dashboard_summary(
             start_at=start_at,
             end_at=end_at,
         ),
+        approvals=approval_summary(db, principal, branch_id=scoped_branch_id),
     )

@@ -40,6 +40,13 @@ type ReportResult =
   | { key: "expenses"; data: DashboardSummary["expenses"] };
 
 const dashboardRefreshMs = 30_000;
+const emptyLoaded = {
+  sales: false,
+  inventory: false,
+  repairs: false,
+  expenses: false,
+  approvals: false,
+};
 
 const emptySummary: DashboardSummary = {
   sales: {
@@ -81,6 +88,18 @@ const emptySummary: DashboardSummary = {
     cancelled_expense_count: 0,
     total_approved_expenses: "0",
     by_category: [],
+  },
+  approvals: {
+    branch_id: null,
+    pending_expense_count: 0,
+    pending_stock_adjustment_count: 0,
+    pending_stock_transfer_count: 0,
+    pending_stock_count_count: 0,
+    pending_purchase_order_count: 0,
+    pending_sale_void_count: 0,
+    pending_sale_return_count: 0,
+    total_pending_count: 0,
+    latest_requested_at: null,
   },
 };
 
@@ -246,7 +265,7 @@ function metricsFor(
     { label: "Net sales", value: money(summary.sales.net_sales), tone: "success", caption: `${integer(summary.sales.sale_count)} receipts` },
     { label: "Stock value", value: money(summary.inventory.stock_value), tone: "info", caption: `${integer(summary.inventory.total_available)} available` },
     { label: "Open repairs", value: integer(summary.repairs.open_ticket_count), tone: "warning", caption: `${integer(summary.repairs.ready_ticket_count)} ready` },
-    { label: "Pending expenses", value: integer(summary.expenses.pending_expense_count), tone: summary.expenses.pending_expense_count ? "warning" : "success", caption: "Awaiting review" },
+    { label: "Pending approvals", value: integer(summary.approvals.total_pending_count), tone: summary.approvals.total_pending_count ? "warning" : "success", caption: "Across review queues" },
   ];
 }
 
@@ -282,6 +301,7 @@ function focusFor(user: CurrentUser | null, summary: DashboardSummary) {
   return [
     ["Review sales performance", `${integer(summary.sales.sale_count)} sale(s), ${money(summary.sales.net_sales)} net sales.`, "success"],
     ["Control stock risk", `${integer(summary.inventory.low_stock_count)} item(s) are below reorder level.`, summary.inventory.low_stock_count ? "danger" : "success"],
+    ["Review pending approvals", `${integer(summary.approvals.total_pending_count)} request(s) need owner or manager attention.`, summary.approvals.total_pending_count ? "warning" : "success"],
     ["Monitor repair flow", `${integer(summary.repairs.open_ticket_count)} ticket(s) still open.`, "info"],
   ] as const;
 }
@@ -340,7 +360,7 @@ function EmptyRow({ colSpan, message }: { colSpan: number; message: string }) {
 export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const { token, user, isPreview } = useAuth();
   const [summary, setSummary] = useState<DashboardSummary>(isPreview ? demoDashboard : emptySummary);
-  const [loaded, setLoaded] = useState({ sales: false, inventory: false, repairs: false, expenses: false });
+  const [loaded, setLoaded] = useState(emptyLoaded);
   const [tillSession, setTillSession] = useState<TillSession | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
   const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
@@ -350,7 +370,13 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   useEffect(() => {
     if (isPreview) {
       setSummary(demoDashboard);
-      setLoaded({ sales: true, inventory: true, repairs: true, expenses: true });
+      setLoaded({
+        sales: true,
+        inventory: true,
+        repairs: true,
+        expenses: true,
+        approvals: true,
+      });
       setLastUpdatedAt(new Date().toISOString());
       setIsRefreshing(false);
       setNotice("Preview mode is using local dashboard data.");
@@ -364,7 +390,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     async function loadDashboard() {
       if (active) setIsRefreshing(true);
       let next = emptySummary;
-      let nextLoaded = { sales: false, inventory: false, repairs: false, expenses: false };
+      let nextLoaded = emptyLoaded;
       let attempts = 0;
       let failures = 0;
       let fullLoaded = false;
@@ -373,7 +399,13 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
         attempts += 1;
         try {
           next = await dashboardSummary(authToken);
-          nextLoaded = { sales: true, inventory: true, repairs: true, expenses: true };
+          nextLoaded = {
+            sales: true,
+            inventory: true,
+            repairs: true,
+            expenses: true,
+            approvals: true,
+          };
           fullLoaded = true;
         } catch {
           failures += 1;
@@ -436,7 +468,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
     if (!lastUpdatedAt) {
       setSummary(emptySummary);
-      setLoaded({ sales: false, inventory: false, repairs: false, expenses: false });
+      setLoaded(emptyLoaded);
     }
     setNotice(null);
     void loadDashboard();
@@ -470,15 +502,47 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const showInventory = canLoadInventory(user) || loaded.inventory;
   const showRepairs = canLoadRepairs(user) || loaded.repairs;
   const showExpenses = canLoadExpenses(user) || loaded.expenses;
+  const showApprovals = loaded.approvals;
   const loadedSectionCount = Object.values(loaded).filter(Boolean).length;
+  const stockApprovalCount =
+    summary.approvals.pending_stock_adjustment_count +
+    summary.approvals.pending_stock_transfer_count +
+    summary.approvals.pending_stock_count_count;
+  const salesApprovalCount =
+    summary.approvals.pending_sale_void_count +
+    summary.approvals.pending_sale_return_count;
   const monitorItems = [
     {
       label: "Expense approvals",
-      value: integer(summary.expenses.pending_expense_count),
+      value: integer(summary.approvals.pending_expense_count),
       caption: "Pending expense(s)",
-      tone: summary.expenses.pending_expense_count ? "warning" : "success",
+      tone: summary.approvals.pending_expense_count ? "warning" : "success",
       view: "expenses" as AppView,
-      visible: showExpenses && canAccessView(user, "expenses"),
+      visible: showApprovals && showExpenses && canAccessView(user, "expenses"),
+    },
+    {
+      label: "Stock approvals",
+      value: integer(stockApprovalCount),
+      caption: "Corrections, transfers, counts",
+      tone: stockApprovalCount ? "warning" : "success",
+      view: "inventory" as AppView,
+      visible: showApprovals && showInventory && canAccessView(user, "inventory"),
+    },
+    {
+      label: "Sales approvals",
+      value: integer(salesApprovalCount),
+      caption: "Returns and void requests",
+      tone: salesApprovalCount ? "warning" : "success",
+      view: "pos" as AppView,
+      visible: showApprovals && showSales && canAccessView(user, "pos"),
+    },
+    {
+      label: "Purchase approvals",
+      value: integer(summary.approvals.pending_purchase_order_count),
+      caption: "Submitted purchase order(s)",
+      tone: summary.approvals.pending_purchase_order_count ? "warning" : "success",
+      view: "purchases" as AppView,
+      visible: showApprovals && canAccessView(user, "purchases"),
     },
     {
       label: "Low stock",
@@ -537,7 +601,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
         </article>
         <article>
           <span>Loaded sections</span>
-          <strong>{integer(loadedSectionCount)} / 4</strong>
+          <strong>{integer(loadedSectionCount)} / 5</strong>
           <small>Visibility depends on this user&apos;s permissions.</small>
         </article>
         <button className="secondary-button" disabled={isRefreshing} onClick={handleRefresh}>

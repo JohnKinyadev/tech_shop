@@ -424,6 +424,19 @@ export type ExpenseSummary = {
   }>;
 };
 
+export type ApprovalSummary = {
+  branch_id: UUID | null;
+  pending_expense_count: number;
+  pending_stock_adjustment_count: number;
+  pending_stock_transfer_count: number;
+  pending_stock_count_count: number;
+  pending_purchase_order_count: number;
+  pending_sale_void_count: number;
+  pending_sale_return_count: number;
+  total_pending_count: number;
+  latest_requested_at: string | null;
+};
+
 export type ExpenseCategory = ModelResponse & {
   name: string;
   description: string | null;
@@ -480,6 +493,7 @@ export type DashboardSummary = {
   inventory: InventorySummary;
   repairs: RepairSummary;
   expenses: ExpenseSummary;
+  approvals: ApprovalSummary;
 };
 
 export type InventoryBalance = {

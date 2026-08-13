@@ -114,6 +114,21 @@ def empty_expenses(branch_id):
     }
 
 
+def empty_approvals(branch_id):
+    return {
+        "branch_id": str(branch_id) if branch_id else None,
+        "pending_expense_count": 0,
+        "pending_stock_adjustment_count": 0,
+        "pending_stock_transfer_count": 0,
+        "pending_stock_count_count": 0,
+        "pending_purchase_order_count": 0,
+        "pending_sale_void_count": 0,
+        "pending_sale_return_count": 0,
+        "total_pending_count": 0,
+        "latest_requested_at": None,
+    }
+
+
 def test_report_routes_are_exposed() -> None:
     paths = app.openapi()["paths"]
     assert "/api/v1/staff/reports/dashboard" in paths
@@ -177,6 +192,7 @@ def test_accountant_can_access_dashboard(monkeypatch) -> None:
             "inventory": empty_inventory(actor.branch_id),
             "repairs": empty_repairs(actor.branch_id),
             "expenses": empty_expenses(actor.branch_id),
+            "approvals": empty_approvals(actor.branch_id),
         },
     )
     response = TestClient(app).get("/api/v1/staff/reports/dashboard")

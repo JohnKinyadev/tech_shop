@@ -98,8 +98,22 @@ class ExpenseSummaryResponse(ReportPeriod):
     by_category: list[ExpenseCategoryBreakdown]
 
 
+class ApprovalSummaryResponse(BaseSchema):
+    branch_id: UUID | None
+    pending_expense_count: int
+    pending_stock_adjustment_count: int
+    pending_stock_transfer_count: int
+    pending_stock_count_count: int
+    pending_purchase_order_count: int
+    pending_sale_void_count: int
+    pending_sale_return_count: int
+    total_pending_count: int
+    latest_requested_at: datetime | None
+
+
 class DashboardSummaryResponse(ReportPeriod):
     sales: SalesSummaryResponse
     inventory: InventorySummaryResponse
     repairs: RepairSummaryResponse
     expenses: ExpenseSummaryResponse
+    approvals: ApprovalSummaryResponse
