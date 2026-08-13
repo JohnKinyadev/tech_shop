@@ -2264,6 +2264,7 @@ button:disabled {
 .settings-checklist,
 .settings-till-list,
 .settings-payment-readiness,
+.settings-payment-guide,
 .settings-receipt-preview {
   display: grid;
   gap: 9px;
@@ -2273,7 +2274,8 @@ button:disabled {
 .settings-branch-card > div,
 .settings-checklist article,
 .settings-till-list button,
-.settings-payment-readiness article {
+.settings-payment-readiness article,
+.settings-payment-guide article {
   display: grid;
   gap: 5px;
   padding: 10px;
@@ -2287,6 +2289,7 @@ button:disabled {
 .settings-checklist span,
 .settings-till-list span,
 .settings-payment-readiness span,
+.settings-payment-guide small,
 .settings-receipt-preview span,
 .settings-receipt-preview small {
   color: var(--muted);
@@ -2294,9 +2297,34 @@ button:disabled {
 }
 
 .settings-checklist article,
-.settings-payment-readiness article {
+.settings-payment-readiness article,
+.settings-payment-guide article {
   grid-template-columns: auto minmax(0, 1fr);
   align-items: start;
+}
+
+.settings-payment-guide {
+  padding: 0;
+}
+
+.settings-payment-guide > strong {
+  font-size: 13px;
+}
+
+.settings-payment-guide article > span {
+  display: grid;
+  width: 24px;
+  height: 24px;
+  place-items: center;
+  border-radius: 999px;
+  color: #fff;
+  background: var(--primary);
+  font-weight: 800;
+}
+
+.settings-payment-guide article div {
+  display: grid;
+  gap: 3px;
 }
 
 .settings-payment-readiness p {

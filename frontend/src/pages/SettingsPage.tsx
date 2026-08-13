@@ -235,12 +235,34 @@ export function SettingsPage() {
     {
       label: "M-Pesa server keys",
       state: "review",
-      detail: "Confirm MPESA_CONSUMER_KEY, SECRET, PASSKEY, SHORTCODE in backend .env",
+      detail:
+        "Confirm TECH_SHOP_MPESA_CONSUMER_KEY, SECRET, PASSKEY, and SHORTCODE in backend .env",
     },
     {
       label: "M-Pesa callback URL",
       state: "review",
-      detail: "Confirm MPESA_CALLBACK_BASE_URL points to your public backend/ngrok URL",
+      detail:
+        "Confirm TECH_SHOP_MPESA_CALLBACK_BASE_URL points to your public backend/ngrok URL",
+    },
+  ];
+  const mpesaCallbackPath = "/api/v1/staff/pos/mpesa/callback";
+  const localPaymentSteps = [
+    {
+      label: "Expose local backend",
+      detail: "Run: ngrok http 8000 while uvicorn is running locally.",
+    },
+    {
+      label: "Set callback base",
+      detail:
+        "In .env use TECH_SHOP_MPESA_CALLBACK_BASE_URL=https://your-ngrok-domain.ngrok-free.app",
+    },
+    {
+      label: "Restart backend",
+      detail: "Restart uvicorn after changing .env so the new callback URL is loaded.",
+    },
+    {
+      label: "Expected callback path",
+      detail: `${mpesaCallbackPath} is appended by the backend when sending STK Push.`,
     },
   ];
   const selectedBranchContact =
@@ -775,6 +797,18 @@ export function SettingsPage() {
               go-live checklist before testing M-Pesa prompts with a public
               callback URL.
             </p>
+            <div className="settings-payment-guide">
+              <strong>Local M-Pesa testing</strong>
+              {localPaymentSteps.map((step, index) => (
+                <article key={step.label}>
+                  <span>{integer(index + 1)}</span>
+                  <div>
+                    <b>{step.label}</b>
+                    <small>{step.detail}</small>
+                  </div>
+                </article>
+              ))}
+            </div>
           </div>
         </section>
       </div>
