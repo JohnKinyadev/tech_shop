@@ -286,24 +286,114 @@ function buildOptionName(form: ItemForm, kind: ItemKind) {
   return "Standard";
 }
 
-function buildSku(form: ItemForm, brandName?: string, kind?: ItemKind) {
-  if (form.sku.trim()) return form.sku.trim().toUpperCase();
-  const parts = [
-    kind === "phone"
-      ? "PHN"
-      : kind === "laptop"
-        ? "LAP"
-        : kind === "repair_part"
-          ? "PRT"
-          : "SKU",
-    brandName,
-    form.model_type || form.item_name,
-    form.rom || form.capacity || form.storage,
+function skuPart(value?: string | null) {
+  return slugify(value ?? "").toUpperCase();
+}
+
+function buildSkuFromParts(parts: Array<string | undefined | null>) {
+  return parts
+    .map(skuPart)
+    .filter(Boolean)
+    .join("-")
+    .slice(0, 72);
+}
+
+function accessorySkuPrefix(category?: Category, form?: ItemForm) {
+  const text = [
+    category?.name,
+    category?.slug,
+    form?.item_name,
+    form?.model_type,
+    form?.capacity,
   ]
     .filter(Boolean)
-    .join(" ");
+    .join(" ")
+    .toLowerCase();
 
-  return slugify(parts).replace(/-/g, "-").toUpperCase();
+  if (text.includes("charger") || text.includes("adapter")) return "CHG";
+  if (text.includes("cable") || text.includes("usb")) return "CBL";
+  if (text.includes("power bank") || text.includes("powerbank")) return "PBK";
+  if (
+    text.includes("flash") ||
+    text.includes("memory") ||
+    text.includes("sd card") ||
+    text.includes("storage")
+  ) {
+    return "STO";
+  }
+  if (text.includes("earphone") || text.includes("headphone") || text.includes("speaker")) {
+    return "AUD";
+  }
+  return "ACC";
+}
+
+function skuFormatHint(kind: ItemKind, category?: Category) {
+  if (kind === "phone") return "PHN-BRAND-MODEL-RAM-ROM-COLOR";
+  if (kind === "laptop") return "LAP-BRAND-MODEL-CPU-RAM-STORAGE";
+  if (kind === "repair_part") return "PRT-BRAND-PART-COMPATIBILITY-COLOR";
+  if (kind === "accessory") {
+    return `${accessorySkuPrefix(category)}-BRAND-ITEM-TYPE-SIZE`;
+  }
+  return "GEN-BRAND-ITEM-TYPE";
+}
+
+function buildSku(
+  form: ItemForm,
+  brandName?: string,
+  kind: ItemKind = "general",
+  category?: Category,
+) {
+  if (form.sku.trim()) return skuPart(form.sku);
+
+  if (kind === "phone") {
+    return buildSkuFromParts([
+      "PHN",
+      brandName,
+      form.model_type,
+      form.ram,
+      form.rom,
+      form.color,
+    ]);
+  }
+
+  if (kind === "laptop") {
+    return buildSkuFromParts([
+      "LAP",
+      brandName,
+      form.model_type,
+      form.processor,
+      form.ram,
+      form.storage,
+    ]);
+  }
+
+  if (kind === "repair_part") {
+    return buildSkuFromParts([
+      "PRT",
+      brandName,
+      form.item_name,
+      form.model_type,
+      form.color,
+    ]);
+  }
+
+  if (kind === "accessory") {
+    return buildSkuFromParts([
+      accessorySkuPrefix(category, form),
+      brandName,
+      form.item_name,
+      form.model_type,
+      form.capacity,
+      form.color,
+    ]);
+  }
+
+  return buildSkuFromParts([
+    "GEN",
+    brandName,
+    form.item_name || form.model_type,
+    form.capacity || form.storage || form.color,
+  ]);
 }
 
 function buildAttributes(form: ItemForm, kind: ItemKind) {
@@ -455,7 +545,8 @@ export function CatalogPage() {
   );
   const draftProductName = buildItemName(itemForm, selectedBrandName);
   const draftOptionName = buildOptionName(itemForm, selectedKind);
-  const draftSku = buildSku(itemForm, selectedBrandName, selectedKind);
+  const draftSku = buildSku(itemForm, selectedBrandName, selectedKind, selectedCategory);
+  const draftSkuPattern = skuFormatHint(selectedKind, selectedCategory);
   const draftAttributes = buildAttributes(itemForm, selectedKind);
   const draftAttributeEntries = Object.entries(draftAttributes).filter(
     ([, value]) => value !== "",
@@ -676,7 +767,7 @@ export function CatalogPage() {
     event.preventDefault();
     const productName = buildItemName(itemForm, selectedBrandName);
     const optionName = buildOptionName(itemForm, selectedKind);
-    const sku = buildSku(itemForm, selectedBrandName, selectedKind);
+    const sku = buildSku(itemForm, selectedBrandName, selectedKind, selectedCategory);
 
     if (!itemForm.category_id) {
       setNotice("Select the item category first.");
@@ -1580,8 +1671,17 @@ export function CatalogPage() {
                         sku: event.target.value.toUpperCase(),
                       }))
                     }
-                    placeholder={buildSku(itemForm, selectedBrandName, selectedKind)}
+                    placeholder={buildSku(
+                      itemForm,
+                      selectedBrandName,
+                      selectedKind,
+                      selectedCategory,
+                    )}
                   />
+                  <span className="field-help">
+                    Leave blank to auto-generate: {draftSkuPattern}. Type your own
+                    SKU only when the shop already uses a fixed code.
+                  </span>
                 </label>
                 <label>
                   Cost price

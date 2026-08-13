@@ -1241,6 +1241,13 @@ button:disabled {
   font-weight: 700;
 }
 
+.field-help {
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 500;
+  line-height: 1.45;
+}
+
 .form-grid {
   display: grid;
   gap: 12px;
