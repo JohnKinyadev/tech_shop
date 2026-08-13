@@ -542,7 +542,10 @@ export function PurchasesPage() {
     if (!token || isPreview) return;
 
     let active = true;
-    listCatalogProducts(token, productSearch)
+    listCatalogProducts(token, productSearch, {
+      isPublished: null,
+      pageSize: 100,
+    })
       .then((result) => {
         if (!active) return;
         setCatalogProducts(result.items);
