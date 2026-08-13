@@ -1155,7 +1155,7 @@ export function PurchasesPage() {
         </article>
       </div>
 
-      <div className="repair-workspace m-t">
+      <div className="repair-workspace purchase-workspace--order-flow m-t">
         <section className="panel-card">
           <header className="panel-card__header">
             <div>
