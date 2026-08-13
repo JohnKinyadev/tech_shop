@@ -14,7 +14,7 @@ import { canAccessView, type AppView } from "../components/AppShell";
 import { StatusPill } from "../components/StatusPill";
 import { demoDashboard } from "../data/demoManagement";
 import { useAuth } from "../state/auth";
-import { integer, money, titleize } from "../utils/format";
+import { dateLabel, integer, money, titleize } from "../utils/format";
 
 type DashboardPageProps = {
   onNavigate?: (view: AppView) => void;
@@ -38,6 +38,8 @@ type ReportResult =
   | { key: "inventory"; data: DashboardSummary["inventory"] }
   | { key: "repairs"; data: DashboardSummary["repairs"] }
   | { key: "expenses"; data: DashboardSummary["expenses"] };
+
+const dashboardRefreshMs = 30_000;
 
 const emptySummary: DashboardSummary = {
   sales: {
@@ -341,11 +343,16 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const [loaded, setLoaded] = useState({ sales: false, inventory: false, repairs: false, expenses: false });
   const [tillSession, setTillSession] = useState<TillSession | null>(null);
   const [notice, setNotice] = useState<string | null>(null);
+  const [lastUpdatedAt, setLastUpdatedAt] = useState<string | null>(null);
+  const [isRefreshing, setIsRefreshing] = useState(false);
+  const [refreshTick, setRefreshTick] = useState(0);
 
   useEffect(() => {
     if (isPreview) {
       setSummary(demoDashboard);
       setLoaded({ sales: true, inventory: true, repairs: true, expenses: true });
+      setLastUpdatedAt(new Date().toISOString());
+      setIsRefreshing(false);
       setNotice("Preview mode is using local dashboard data.");
       return;
     }
@@ -355,6 +362,7 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
     let active = true;
 
     async function loadDashboard() {
+      if (active) setIsRefreshing(true);
       let next = emptySummary;
       let nextLoaded = { sales: false, inventory: false, repairs: false, expenses: false };
       let attempts = 0;
@@ -417,6 +425,8 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       if (!active) return;
       setSummary(next);
       setLoaded(nextLoaded);
+      setLastUpdatedAt(new Date().toISOString());
+      setIsRefreshing(false);
       setNotice(
         failures > 0 && attempts > 0
           ? "Some live dashboard widgets are unavailable for this role. Showing only the sections this account can access."
@@ -424,15 +434,29 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
       );
     }
 
-    setSummary(emptySummary);
-    setLoaded({ sales: false, inventory: false, repairs: false, expenses: false });
+    if (!lastUpdatedAt) {
+      setSummary(emptySummary);
+      setLoaded({ sales: false, inventory: false, repairs: false, expenses: false });
+    }
     setNotice(null);
     void loadDashboard();
 
     return () => {
       active = false;
     };
-  }, [isPreview, token, user]);
+  }, [isPreview, refreshTick, token, user]);
+
+  useEffect(() => {
+    if (!token || isPreview) return;
+    const timer = window.setInterval(() => {
+      setRefreshTick((current) => current + 1);
+    }, dashboardRefreshMs);
+    return () => window.clearInterval(timer);
+  }, [isPreview, token]);
+
+  function handleRefresh() {
+    setRefreshTick((current) => current + 1);
+  }
 
   const profile = useMemo(() => roleProfile(user), [user]);
   const metrics = useMemo(() => metricsFor(user, summary, tillSession), [summary, tillSession, user]);
@@ -446,6 +470,33 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
   const showInventory = canLoadInventory(user) || loaded.inventory;
   const showRepairs = canLoadRepairs(user) || loaded.repairs;
   const showExpenses = canLoadExpenses(user) || loaded.expenses;
+  const loadedSectionCount = Object.values(loaded).filter(Boolean).length;
+  const monitorItems = [
+    {
+      label: "Expense approvals",
+      value: integer(summary.expenses.pending_expense_count),
+      caption: "Pending expense(s)",
+      tone: summary.expenses.pending_expense_count ? "warning" : "success",
+      view: "expenses" as AppView,
+      visible: showExpenses && canAccessView(user, "expenses"),
+    },
+    {
+      label: "Low stock",
+      value: integer(summary.inventory.low_stock_count),
+      caption: "Needs reorder/transfer review",
+      tone: summary.inventory.low_stock_count ? "danger" : "success",
+      view: "inventory" as AppView,
+      visible: showInventory && canAccessView(user, "inventory"),
+    },
+    {
+      label: "Ready repairs",
+      value: integer(summary.repairs.ready_ticket_count),
+      caption: "Waiting for pickup/payment flow",
+      tone: summary.repairs.ready_ticket_count ? "info" : "success",
+      view: "repairs" as AppView,
+      visible: showRepairs && canAccessView(user, "repairs"),
+    },
+  ].filter((item) => item.visible);
 
   return (
     <section className="dashboard-page module-page">
@@ -469,6 +520,31 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
 
       {notice && <div className="notice notice--page">{notice}</div>}
 
+      <section className="dashboard-live-strip">
+        <article>
+          <span>Dashboard refresh</span>
+          <strong>{isRefreshing ? "Refreshing..." : "Auto-refresh on"}</strong>
+          <small>
+            {lastUpdatedAt
+              ? `Last updated ${dateLabel(lastUpdatedAt)}`
+              : "Waiting for the first live update."}
+          </small>
+        </article>
+        <article>
+          <span>Refresh cycle</span>
+          <strong>Every 30 seconds</strong>
+          <small>Useful for approvals, sales, repairs, and stock changes.</small>
+        </article>
+        <article>
+          <span>Loaded sections</span>
+          <strong>{integer(loadedSectionCount)} / 4</strong>
+          <small>Visibility depends on this user&apos;s permissions.</small>
+        </article>
+        <button className="secondary-button" disabled={isRefreshing} onClick={handleRefresh}>
+          {isRefreshing ? "Refreshing..." : "Refresh Now"}
+        </button>
+      </section>
+
       <div className="stats-grid stats-grid--compact">
         {metrics.map((metric) => (
           <article className="metric-card" key={metric.label}>
@@ -478,6 +554,25 @@ export function DashboardPage({ onNavigate }: DashboardPageProps) {
           </article>
         ))}
       </div>
+
+      {monitorItems.length > 0 && (
+        <section className="dashboard-approval-strip">
+          {monitorItems.map((item) => (
+            <button
+              key={item.label}
+              type="button"
+              onClick={() => onNavigate?.(item.view)}
+            >
+              <span>{item.label}</span>
+              <strong>{item.value}</strong>
+              <small>{item.caption}</small>
+              <StatusPill tone={item.tone as StatusTone}>
+                {Number(item.value.replace(/,/g, "")) > 0 ? "Review" : "Clear"}
+              </StatusPill>
+            </button>
+          ))}
+        </section>
+      )}
 
       <div className="dashboard-grid">
         <section className="panel-card">
