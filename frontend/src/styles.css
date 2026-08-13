@@ -1129,6 +1129,14 @@ button:disabled {
   align-items: start;
 }
 
+.repair-workspace--ticket-flow {
+  grid-template-columns: minmax(0, 1fr);
+}
+
+.repair-workspace--ticket-flow > .panel-card {
+  width: 100%;
+}
+
 .form-panel,
 .ticket-action-panel {
   display: grid;

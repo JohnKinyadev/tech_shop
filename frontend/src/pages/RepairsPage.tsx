@@ -1504,7 +1504,7 @@ export function RepairsPage() {
         </div>
       </section>
 
-      <div className="repair-workspace m-t">
+      <div className="repair-workspace repair-workspace--ticket-flow m-t">
         <section className="panel-card">
           <header className="panel-card__header">
             <div>
