@@ -65,9 +65,39 @@ Seeded records include:
 - Supplier, purchase order, goods receipt, stock balances/movements
 - Open cashier till session
 - Customer, completed POS sale, payment, warranty data
-- Pending inventory adjustment request, draft stock transfer, draft stock count
+- Pending inventory adjustment request, draft stock transfer, stock count workflow
 - Ready and paid repair ticket
 - Approved expense
+
+## Current project track
+
+We are finishing the internal management system first. The public website, deployment,
+permanent image storage, and full visual redesign are deliberately parked until the
+client has reviewed the operating system module by module.
+
+Completed/active internal upgrades:
+
+- Dashboard refreshes live API data every 30 seconds and also has a manual refresh button.
+- Dashboard summary includes pending approval queues for expenses, stock corrections,
+  branch transfers, stock counts, purchase orders, sale voids, and sale returns.
+- Catalog add-item flow auto-generates category-aware SKUs while still allowing manual
+  override where the shop already has a fixed code.
+- Inventory operation wording uses user-facing labels such as stock correction, branch
+  transfer, and stock count approval instead of internal workflow terms.
+
+Still useful internal improvements:
+
+- Add export-friendly report views and optional charts.
+- Keep tightening module copy and form layout where users need clearer everyday wording.
+- Consider WebSockets/SSE later if the owner needs instant push alerts instead of
+  short-interval dashboard refresh.
+
+Parked improvements:
+
+- Customer-facing website.
+- Vercel/production deployment flow.
+- Cloudinary or other permanent product image storage.
+- Full redesign/theme exploration beyond small usability adjustments.
 
 ## Architecture rule
 
@@ -415,7 +445,7 @@ matching `backend/schemas/*_schemas.py` file or in Swagger.
 
 | Method | Path | Params | Body | What it does |
 | --- | --- | --- | --- | --- |
-| GET | `/reports/dashboard` | `branch_id`, `start_at`, `end_at` query | - | Combined sales/inventory/repair/expense summary |
+| GET | `/reports/dashboard` | `branch_id`, `start_at`, `end_at` query | - | Combined sales/inventory/repair/expense/approval summary |
 | GET | `/reports/sales` | `branch_id`, `start_at`, `end_at`, `top_limit` query | - | Sales totals, payments, top items |
 | GET | `/reports/inventory` | `branch_id`, `low_stock_limit` query | - | Stock value, totals, low-stock items |
 | GET | `/reports/repairs` | `branch_id`, `start_at`, `end_at`, `technician_id` query | - | Repair status and revenue summary |

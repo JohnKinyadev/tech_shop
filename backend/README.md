@@ -143,12 +143,14 @@ expenses, and approve, reject, or cancel them. Accountants get read-only access 
 separate `expenses.view` permission, which keeps financial visibility independent from
 operational authority.
 
-Operational reports are available under `/api/v1/staff/reports`. The first report slice
-provides read-only dashboard, sales, inventory, repair, and expense summaries. Reports are
-calculated from live operational records rather than stored totals, remain branch-scoped
-for non-Admin staff, and allow technicians to view only their own assigned repair report
-scope.
+Operational reports are available under `/api/v1/staff/reports`. The dashboard combines
+sales, inventory, repair, expense, and pending-approval summaries so managers can see
+requests waiting across expenses, stock corrections, transfers, stock counts, purchases,
+sale voids, and returns. Reports are calculated from live operational records rather than
+stored totals, remain branch-scoped for non-Admin staff, and allow technicians to view
+only their own assigned repair report scope.
 
-The next implementation slice is hardening: live PostgreSQL smoke checks for the newest
-workflows, export-friendly report formats, and then preparation for the customer-facing
-website API.
+The next internal implementation slice is hardening: export-friendly report formats,
+small module-level usability fixes, and optional push-style dashboard events if the client
+needs instant updates. Website, deployment, permanent image storage, and full redesign work
+are intentionally parked for later client review.
