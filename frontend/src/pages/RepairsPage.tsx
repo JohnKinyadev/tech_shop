@@ -198,6 +198,22 @@ export function RepairsPage() {
   const [statusFilter, setStatusFilter] = useState("all");
   const [notice, setNotice] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
+  const repairRoleCode = user?.role_code?.toLowerCase() ?? "";
+  const repairRoleName = user?.role_name?.toLowerCase() ?? "";
+  const isAdminRepairProfile = ["admin", "owner"].includes(repairRoleCode);
+  const isBranchManagerRepairProfile = repairRoleCode === "branch_manager";
+  const isTechnicianRepairProfile =
+    repairRoleCode === "technician" || repairRoleName.includes("technician");
+  const isCashierRepairProfile =
+    repairRoleCode === "cashier" || repairRoleName.includes("cashier");
+  const canManageRepairAssignment =
+    isPreview || isAdminRepairProfile || isBranchManagerRepairProfile;
+  const showTechnicianRepairWorkbench = isPreview || isTechnicianRepairProfile;
+  const showCashierRepairHandoff = isPreview || isCashierRepairProfile;
+  const canCancelRepairFromDesk =
+    isPreview || isAdminRepairProfile || isBranchManagerRepairProfile;
+  const showRepairOversightNote =
+    isAdminRepairProfile || isBranchManagerRepairProfile;
 
   const roleNameById = useMemo(
     () => new Map(roles.map((role) => [role.id, role.name])),
@@ -1871,31 +1887,48 @@ export function RepairsPage() {
                   </StatusPill>
                 </div>
 
-                <form onSubmit={handleAssign} className="action-form">
-                  <div className="repair-form-hint">
-                    <span>Current owner</span>
-                    <strong>{technicianLabel(selectedTicket.technician_id)}</strong>
-                  </div>
-                  <label>
-                    Assign technician
-                    <select
-                      value={selectedTechnicianId}
-                      onChange={(event) => setSelectedTechnicianId(event.target.value)}
-                    >
-                      <option value="">Select technician</option>
-                      {technicianOptions.map((staff) => (
-                        <option key={staff.id} value={staff.id}>
-                          {staff.full_name} / {roleNameById.get(staff.role_id) ?? "Staff"}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <button className="secondary-button" disabled={busy}>
-                    Assign
-                  </button>
-                </form>
+                {canManageRepairAssignment && (
+                  <form onSubmit={handleAssign} className="action-form">
+                    <div className="repair-form-hint">
+                      <span>Current owner</span>
+                      <strong>{technicianLabel(selectedTicket.technician_id)}</strong>
+                    </div>
+                    <label>
+                      Assign technician
+                      <select
+                        value={selectedTechnicianId}
+                        onChange={(event) => setSelectedTechnicianId(event.target.value)}
+                      >
+                        <option value="">Select technician</option>
+                        {technicianOptions.map((staff) => (
+                          <option key={staff.id} value={staff.id}>
+                            {staff.full_name} / {roleNameById.get(staff.role_id) ?? "Staff"}
+                          </option>
+                        ))}
+                      </select>
+                    </label>
+                    <button className="secondary-button" disabled={busy}>
+                      Assign
+                    </button>
+                  </form>
+                )}
 
-                <form onSubmit={handleSubmitDiagnosis} className="action-form">
+                {showRepairOversightNote && (
+                  <div className="action-form">
+                    <div className="repair-form-hint">
+                      <span>Admin repair view</span>
+                      <strong>Oversight and assignment</strong>
+                    </div>
+                    <p className="muted">
+                      Diagnosis, parts usage, and ready-for-pickup actions belong
+                      to the technician. Quote decisions, repair payments, and
+                      customer handover belong to the cashier/front desk.
+                    </p>
+                  </div>
+                )}
+
+                {showTechnicianRepairWorkbench && (
+                  <form onSubmit={handleSubmitDiagnosis} className="action-form">
                   <div className="repair-form-hint">
                     <span>Diagnosis & quote</span>
                     <strong>
@@ -1973,9 +2006,11 @@ export function RepairsPage() {
                   >
                     Submit Diagnosis
                   </button>
-                </form>
+                  </form>
+                )}
 
-                <div className="action-form">
+                {showCashierRepairHandoff && (
+                  <div className="action-form">
                   <div className="repair-form-hint">
                     <span>Customer quote decision</span>
                     <strong>
@@ -2010,9 +2045,11 @@ export function RepairsPage() {
                       Decline
                     </button>
                   </div>
-                </div>
+                  </div>
+                )}
 
-                <form onSubmit={handleStatusUpdate} className="action-form">
+                {showTechnicianRepairWorkbench && (
+                  <form onSubmit={handleStatusUpdate} className="action-form">
                   <div className="repair-form-hint">
                     <span>Suggested next step</span>
                     <strong>{titleize(recommendedNextStatus(selectedTicket.status))}</strong>
@@ -2041,9 +2078,11 @@ export function RepairsPage() {
                   <button className="secondary-button" disabled={busy}>
                     Update Status
                   </button>
-                </form>
+                  </form>
+                )}
 
-                <form onSubmit={handleAddPart} className="action-form">
+                {showTechnicianRepairWorkbench && (
+                  <form onSubmit={handleAddPart} className="action-form">
                   <div className="repair-form-hint">
                     <span>Parts used</span>
                     <strong>{integer(selectedTicketParts.length)} line(s)</strong>
@@ -2189,7 +2228,8 @@ export function RepairsPage() {
                       approval.
                     </p>
                   )}
-                </form>
+                  </form>
+                )}
 
                 <div className="action-form">
                   <div className="repair-form-hint">
@@ -2229,25 +2269,34 @@ export function RepairsPage() {
                     </p>
                   )}
 
-                  <label>
-                    Ready note
-                    <textarea
-                      value={readyNote}
-                      onChange={(event) => setReadyNote(event.target.value)}
-                      placeholder="Testing complete, customer notified..."
-                    />
-                  </label>
-                  <button
-                    className="secondary-button"
-                    disabled={busy || selectedTicket.status !== "repairing"}
-                    onClick={() => void handleMarkReady()}
-                    type="button"
-                  >
-                    Mark Ready for Pickup
-                  </button>
+                  {showTechnicianRepairWorkbench ? (
+                    <>
+                      <label>
+                        Ready note
+                        <textarea
+                          value={readyNote}
+                          onChange={(event) => setReadyNote(event.target.value)}
+                          placeholder="Testing complete, customer notified..."
+                        />
+                      </label>
+                      <button
+                        className="secondary-button"
+                        disabled={busy || selectedTicket.status !== "repairing"}
+                        onClick={() => void handleMarkReady()}
+                        type="button"
+                      >
+                        Mark Ready for Pickup
+                      </button>
+                    </>
+                  ) : (
+                    <p className="muted">
+                      The technician marks the device ready after repair and testing.
+                    </p>
+                  )}
                 </div>
 
-                <form onSubmit={handleRepairPayment} className="action-form">
+                {showCashierRepairHandoff && (
+                  <form onSubmit={handleRepairPayment} className="action-form">
                   <div className="repair-form-hint">
                     <span>Repair payment</span>
                     <strong>
@@ -2367,9 +2416,11 @@ export function RepairsPage() {
                   >
                     Record Repair Payment
                   </button>
-                </form>
+                  </form>
+                )}
 
-                <div className="action-form">
+                {showCashierRepairHandoff && (
+                  <div className="action-form">
                   <div
                     className={`repair-payment-readiness ${
                       collectionIssue ? "is-blocked" : "is-ready"
@@ -2394,20 +2445,34 @@ export function RepairsPage() {
                   >
                     Collect Device
                   </button>
-                  <button
-                    className="ghost-button"
-                    disabled={
-                      busy ||
-                      ["ready_for_pickup", "collected", "cancelled"].includes(
-                        selectedTicket.status,
-                      )
-                    }
-                    onClick={() => void handleCancelRepair()}
-                    type="button"
-                  >
-                    Cancel Repair
-                  </button>
-                </div>
+                  </div>
+                )}
+
+                {canCancelRepairFromDesk && (
+                  <div className="action-form">
+                    <div className="repair-form-hint">
+                      <span>Manager action</span>
+                      <strong>Cancel repair</strong>
+                    </div>
+                    <p className="muted">
+                      Use this only when the repair should be stopped before it is
+                      ready, collected, or already cancelled.
+                    </p>
+                    <button
+                      className="ghost-button"
+                      disabled={
+                        busy ||
+                        ["ready_for_pickup", "collected", "cancelled"].includes(
+                          selectedTicket.status,
+                        )
+                      }
+                      onClick={() => void handleCancelRepair()}
+                      type="button"
+                    >
+                      Cancel Repair
+                    </button>
+                  </div>
+                )}
               </>
             ) : (
               <p className="muted">Select a repair ticket from the queue.</p>
