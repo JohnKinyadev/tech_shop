@@ -104,6 +104,26 @@ export class ApiError extends Error {
   }
 }
 
+function formatApiErrorDetail(detail: unknown, fallback: string) {
+  if (typeof detail === "string") return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail
+      .map((item) => {
+        if (!item || typeof item !== "object") return "";
+        const record = item as { loc?: unknown; msg?: unknown };
+        const field = Array.isArray(record.loc)
+          ? record.loc.filter((part) => part !== "body").join(".")
+          : "";
+        const message = typeof record.msg === "string" ? record.msg : "";
+        if (field && message) return `${field}: ${message}`;
+        return message;
+      })
+      .filter(Boolean);
+    if (messages.length) return messages.join("; ");
+  }
+  return fallback;
+}
+
 function buildUrl(path: string, query?: RequestOptions["query"]) {
   const url = new URL(`${API_BASE_URL}${path}`);
   Object.entries(query ?? {}).forEach(([key, value]) => {
@@ -130,10 +150,10 @@ export async function apiRequest<T>(
   if (!response.ok) {
     const payload = await response.json().catch(() => null);
     const detail = payload?.detail;
-    const message =
-      typeof detail === "string"
-        ? detail
-        : `Request failed with HTTP ${response.status}`;
+    const message = formatApiErrorDetail(
+      detail,
+      `Request failed with HTTP ${response.status}`,
+    );
     throw new ApiError(message, response.status);
   }
 

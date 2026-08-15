@@ -145,6 +145,12 @@ function phoneImeiLooksValid(value: string) {
   return /^\d{15}$/.test(value.trim());
 }
 
+function isUuid(value: string) {
+  return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
+    value,
+  );
+}
+
 function catalogToVariantOptions(products: CatalogProduct[]): VariantOption[] {
   return products.flatMap((product) =>
     product.variants.map((variant) => ({
@@ -312,13 +318,21 @@ export function RepairsPage() {
         customer.phone.replace(/\D/g, "") ===
         customerForm.phone.replace(/\D/g, ""),
     );
+  const liveBranchReady = !token || isPreview || isUuid(selectedBranchId);
+  const liveCustomerReady =
+    !token ||
+    isPreview ||
+    ticketForm.customer_id === "__new__" ||
+    isUuid(ticketForm.customer_id);
   const intakeFormReady = Boolean(
     selectedBranchId &&
+      liveBranchReady &&
       ticketForm.customer_id &&
+      liveCustomerReady &&
       ticketForm.device_brand.trim() &&
       ticketForm.device_model.trim() &&
-      ticketForm.reported_issue.trim() &&
-      ticketForm.intake_condition.trim() &&
+      ticketForm.reported_issue.trim().length >= 5 &&
+      ticketForm.intake_condition.trim().length >= 3 &&
       !intakeIdentityIssue &&
       (ticketForm.customer_id !== "__new__" ||
         (customerForm.full_name.trim() &&
@@ -452,7 +466,11 @@ export function RepairsPage() {
         setCustomers(customersResult.value);
         setTicketForm((current) => ({
           ...current,
-          customer_id: current.customer_id || customersResult.value[0]?.id || "__new__",
+          customer_id:
+            current.customer_id &&
+            customersResult.value.some((customer) => customer.id === current.customer_id)
+              ? current.customer_id
+              : customersResult.value[0]?.id || "__new__",
         }));
       } else {
         failed = true;
@@ -757,8 +775,21 @@ export function RepairsPage() {
       setNotice("Select a branch before creating a repair ticket.");
       return;
     }
+    if (token && !isPreview && !isUuid(selectedBranchId)) {
+      setNotice("Branch data is still in preview mode. Refresh repairs or select a live branch before creating a ticket.");
+      return;
+    }
     if (!ticketForm.customer_id) {
       setNotice("Select or create a customer before intake.");
+      return;
+    }
+    if (
+      token &&
+      !isPreview &&
+      ticketForm.customer_id !== "__new__" &&
+      !isUuid(ticketForm.customer_id)
+    ) {
+      setNotice("Customer data is still in preview mode. Select a live customer or create a new one before intake.");
       return;
     }
     if (
@@ -768,6 +799,14 @@ export function RepairsPage() {
       !intakeCondition
     ) {
       setNotice("Device brand, model, issue, and intake condition are required.");
+      return;
+    }
+    if (reportedIssue.length < 5) {
+      setNotice("Reported issue must be at least 5 characters.");
+      return;
+    }
+    if (intakeCondition.length < 3) {
+      setNotice("Intake condition must be at least 3 characters.");
       return;
     }
     if (intakeIdentityIssue) {
