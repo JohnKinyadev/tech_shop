@@ -3879,6 +3879,184 @@ button:disabled {
   border-radius: var(--radius);
 }
 
+.pos-repair-pickups-workspace {
+  display: grid;
+  grid-template-columns: minmax(260px, 0.9fr) minmax(360px, 1.35fr);
+  gap: 12px;
+  flex: 1 1 auto;
+  min-height: 0;
+  padding: 12px;
+  overflow: hidden;
+}
+
+.repair-pickup-queue,
+.repair-pickup-detail {
+  display: flex;
+  min-height: 0;
+  flex-direction: column;
+  gap: 10px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+}
+
+.repair-pickup-queue header,
+.repair-pickup-detail header,
+.repair-pickup-payments header,
+.repair-pickup-actions {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.repair-pickup-queue header p,
+.repair-pickup-detail header p {
+  margin: 0;
+}
+
+.repair-pickup-queue header span,
+.repair-pickup-detail header span,
+.repair-pickup-device span,
+.repair-pickup-totals span,
+.repair-pickup-payments > span,
+.repair-pickup-row span,
+.repair-pickup-row small {
+  color: var(--muted);
+  line-height: 1.4;
+}
+
+.repair-pickup-queue header button,
+.repair-pickup-payments header button,
+.repair-pickup-actions button {
+  min-height: 32px;
+  padding: 5px 10px;
+  border: 1px solid var(--line);
+  background: var(--panel-soft);
+}
+
+.repair-pickup-warning {
+  padding: 9px 10px;
+  color: #8a5b00;
+  border: 1px solid #f5d389;
+  border-radius: var(--radius);
+  background: #fff8e8;
+  font-size: 13px;
+}
+
+.repair-pickup-list {
+  display: grid;
+  gap: 7px;
+  min-height: 0;
+  overflow: auto;
+}
+
+.repair-pickup-row {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) auto;
+  gap: 10px;
+  align-items: center;
+  padding: 10px;
+  color: var(--text);
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+  text-align: left;
+}
+
+.repair-pickup-row:hover,
+.repair-pickup-row.is-selected {
+  border-color: var(--primary);
+  background: #f4f9fd;
+}
+
+.repair-pickup-row div {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+}
+
+.repair-pickup-row div:last-child {
+  justify-items: end;
+}
+
+.repair-pickup-detail h2 {
+  margin: 0;
+  font-size: 20px;
+}
+
+.repair-pickup-device {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.repair-pickup-totals {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.repair-pickup-totals div {
+  display: grid;
+  gap: 4px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--panel-soft);
+}
+
+.repair-pickup-totals__balance {
+  color: #1f6f2d;
+  border-color: #c8e8cd !important;
+  background: #eef9ee !important;
+}
+
+.repair-pickup-payment {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 8px;
+  padding: 10px;
+  border: 1px solid #b9d8f0;
+  border-radius: var(--radius);
+  background: #f4f9fd;
+}
+
+.repair-pickup-payment label {
+  display: grid;
+  gap: 4px;
+  color: var(--muted);
+  font-size: 12px;
+  font-weight: 700;
+}
+
+.repair-pickup-payment input,
+.repair-pickup-payment select {
+  min-height: 34px;
+  padding: 6px 9px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: #fff;
+  color: var(--text);
+  outline: none;
+}
+
+.repair-pickup-payment button {
+  grid-column: 1 / -1;
+  min-height: 40px;
+}
+
+.repair-pickup-payments {
+  display: grid;
+  gap: 8px;
+  min-height: 0;
+  overflow: auto;
+}
+
 .pos-empty-state {
   display: grid;
   gap: 6px;
@@ -4552,6 +4730,19 @@ button:disabled {
 
   .pos-terminal {
     grid-template-columns: minmax(440px, 480px) minmax(0, 1fr);
+  }
+
+  .pos-repair-pickups-workspace {
+    grid-template-columns: minmax(0, 1fr);
+    overflow: auto;
+  }
+
+  .repair-pickup-list {
+    max-height: 280px;
+  }
+
+  .repair-pickup-totals {
+    grid-template-columns: repeat(2, minmax(0, 1fr));
   }
 
   .payment-modal__body {

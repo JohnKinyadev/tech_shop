@@ -812,6 +812,13 @@ export function listRepairs(
   });
 }
 
+export function listRepairPickups(token: string, branchId: string) {
+  return apiRequest<RepairInvoice[]>("/repairs/pickups", {
+    token,
+    query: { branch_id: branchId },
+  });
+}
+
 export function createRepairBooking(token: string, body: RepairBookingPayload) {
   return apiRequest<RepairTicket>("/repairs", {
     token,

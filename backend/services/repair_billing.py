@@ -88,6 +88,46 @@ def _invoice_values(
     return labor, parts, total, paid, due, payments
 
 
+def _invoice_payment_status(due: Decimal, paid: Decimal) -> str:
+    if due == 0:
+        return "paid"
+    if paid > 0:
+        return "partially_paid"
+    return "unpaid"
+
+
+def _invoice_response(
+    db: Session, ticket: RepairTicket, customer: Customer
+) -> RepairInvoiceResponse:
+    labor, parts, total, paid, due, payments = _invoice_values(db, ticket)
+    return RepairInvoiceResponse(
+        ticket_id=ticket.id,
+        ticket_number=ticket.ticket_number,
+        branch_id=ticket.branch_id,
+        customer_id=customer.id,
+        customer_name=customer.full_name,
+        customer_phone=customer.phone,
+        device_description=(
+            f"{ticket.device_brand} {ticket.device_model} ({ticket.device_type})"
+        ),
+        labor_amount=labor,
+        parts_amount=parts,
+        total_amount=total,
+        paid_amount=paid,
+        balance_due=due,
+        payment_status=_invoice_payment_status(due, paid),
+        payments=[
+            RepairInvoicePayment(
+                method=payment.method,
+                amount=payment.amount,
+                provider_reference=payment.provider_reference,
+                paid_at=payment.paid_at,
+            )
+            for payment in payments
+        ],
+    )
+
+
 def invoice(
     db: Session, principal: AuthPrincipal, ticket_id: UUID
 ) -> RepairInvoiceResponse:
@@ -104,39 +144,32 @@ def invoice(
     customer = db.get(Customer, ticket.customer_id)
     if customer is None:
         raise NotFoundError("repair customer no longer exists")
-    labor, parts, total, paid, due, payments = _invoice_values(db, ticket)
-    if due == 0:
-        payment_status = "paid"
-    elif paid > 0:
-        payment_status = "partially_paid"
-    else:
-        payment_status = "unpaid"
-    return RepairInvoiceResponse(
-        ticket_id=ticket.id,
-        ticket_number=ticket.ticket_number,
-        branch_id=ticket.branch_id,
-        customer_id=customer.id,
-        customer_name=customer.full_name,
-        customer_phone=customer.phone,
-        device_description=(
-            f"{ticket.device_brand} {ticket.device_model} ({ticket.device_type})"
-        ),
-        labor_amount=labor,
-        parts_amount=parts,
-        total_amount=total,
-        paid_amount=paid,
-        balance_due=due,
-        payment_status=payment_status,
-        payments=[
-            RepairInvoicePayment(
-                method=payment.method,
-                amount=payment.amount,
-                provider_reference=payment.provider_reference,
-                paid_at=payment.paid_at,
-            )
-            for payment in payments
-        ],
-    )
+    return _invoice_response(db, ticket, customer)
+
+
+def list_ready_pickups(
+    db: Session, principal: AuthPrincipal, branch_id: UUID
+) -> list[RepairInvoiceResponse]:
+    if principal.role_code != ADMIN and "sales.process" not in principal.permissions:
+        raise AuthorizationError("only checkout staff can view repair pickups")
+    enforce_branch_scope(principal, branch_id)
+
+    rows = db.execute(
+        select(RepairTicket, Customer)
+        .join(Customer, Customer.id == RepairTicket.customer_id)
+        .where(
+            RepairTicket.branch_id == branch_id,
+            RepairTicket.status == RepairStatus.READY_FOR_PICKUP,
+            RepairTicket.is_deleted.is_(False),
+            Customer.is_deleted.is_(False),
+        )
+        .order_by(
+            RepairTicket.ready_at.is_(None),
+            RepairTicket.ready_at,
+            RepairTicket.created_at,
+        )
+    ).all()
+    return [_invoice_response(db, ticket, customer) for ticket, customer in rows]
 
 
 def _open_payment_session(

@@ -83,6 +83,15 @@ def create_repair_booking(
     return item
 
 
+@router.get("/pickups", response_model=list[RepairInvoiceResponse])
+def list_repair_pickups(
+    branch_id: UUID,
+    principal: CurrentPrincipal,
+    db: DatabaseSession,
+) -> list[RepairInvoiceResponse]:
+    return repair_billing.list_ready_pickups(db, principal, branch_id)
+
+
 @router.get("/{ticket_id}", response_model=RepairTicketView)
 def get_repair(
     ticket_id: UUID,
