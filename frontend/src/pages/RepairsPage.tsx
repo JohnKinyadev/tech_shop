@@ -1528,6 +1528,7 @@ export function RepairsPage() {
               <label>
                 Customer
                 <select
+                  name="customer_id"
                   value={ticketForm.customer_id}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1547,6 +1548,7 @@ export function RepairsPage() {
               <label>
                 Device type
                 <select
+                  name="device_type"
                   value={ticketForm.device_type}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1571,6 +1573,7 @@ export function RepairsPage() {
                   <label>
                     Full name
                     <input
+                      name="customer_full_name"
                       value={customerForm.full_name}
                       onChange={(event) =>
                         setCustomerForm((current) => ({
@@ -1583,6 +1586,7 @@ export function RepairsPage() {
                   <label>
                     Phone
                     <input
+                      name="customer_phone"
                       value={customerForm.phone}
                       onChange={(event) =>
                         setCustomerForm((current) => ({
@@ -1607,6 +1611,7 @@ export function RepairsPage() {
                     <label>
                       Email
                     <input
+                      name="customer_email"
                       value={customerForm.email}
                       onChange={(event) =>
                         setCustomerForm((current) => ({
@@ -1672,6 +1677,7 @@ export function RepairsPage() {
               <label>
                 Brand
                 <input
+                  name="device_brand"
                   value={ticketForm.device_brand}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1685,6 +1691,7 @@ export function RepairsPage() {
               <label>
                 Model
                 <input
+                  name="device_model"
                   value={ticketForm.device_model}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1698,6 +1705,7 @@ export function RepairsPage() {
               <label>
                 Serial number
                 <input
+                  name="serial_number"
                   value={ticketForm.serial_number}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1721,6 +1729,7 @@ export function RepairsPage() {
               <label>
                 IMEI
                 <input
+                  name="imei"
                   value={ticketForm.imei}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1746,6 +1755,7 @@ export function RepairsPage() {
             <label>
               Reported issue
               <textarea
+                name="reported_issue"
                 value={ticketForm.reported_issue}
                 onChange={(event) =>
                   setTicketForm((current) => ({
@@ -1761,6 +1771,7 @@ export function RepairsPage() {
               <label>
                 Intake condition
                 <textarea
+                  name="intake_condition"
                   value={ticketForm.intake_condition}
                   onChange={(event) =>
                     setTicketForm((current) => ({
@@ -1774,6 +1785,7 @@ export function RepairsPage() {
               <label>
                 Accessories received
                 <textarea
+                  name="accessories_received"
                   value={ticketForm.accessories_received}
                   onChange={(event) =>
                     setTicketForm((current) => ({
