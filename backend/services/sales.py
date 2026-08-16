@@ -459,6 +459,9 @@ def record_failed_payment_attempt(
         amount=amount,
         currency="KES",
         provider_reference=payload.provider_reference,
+        payer_phone=payload.payer_phone,
+        payer_name=payload.payer_name,
+        payer_account_reference=payload.payer_account_reference,
         idempotency_key=payload.idempotency_key,
         notes=payload.notes,
     )
@@ -547,6 +550,15 @@ def complete_pending_payment(
                 **(payment.provider_payload or {}),
                 **provider_payload,
             }
+            if not payment.payer_phone and provider_payload.get("phone_number"):
+                payment.payer_phone = str(provider_payload["phone_number"])
+            if (
+                not payment.payer_account_reference
+                and provider_payload.get("account_reference")
+            ):
+                payment.payer_account_reference = str(
+                    provider_payload["account_reference"]
+                )
         if paid_at and payment.paid_at is None:
             payment.paid_at = paid_at
         db.flush()
@@ -582,6 +594,16 @@ def complete_pending_payment(
         **(payment.provider_payload or {}),
         **(provider_payload or {}),
     }
+    if provider_payload:
+        if not payment.payer_phone and provider_payload.get("phone_number"):
+            payment.payer_phone = str(provider_payload["phone_number"])
+        if (
+            not payment.payer_account_reference
+            and provider_payload.get("account_reference")
+        ):
+            payment.payer_account_reference = str(
+                provider_payload["account_reference"]
+            )
     payment.paid_at = now
 
     sale.paid_amount = money(sale.paid_amount + payment.amount)
@@ -649,6 +671,9 @@ def add_payment(
         amount=money(payload.amount),
         currency="KES",
         provider_reference=payload.provider_reference,
+        payer_phone=payload.payer_phone,
+        payer_name=payload.payer_name,
+        payer_account_reference=payload.payer_account_reference,
         idempotency_key=payload.idempotency_key,
         paid_at=now,
         notes=payload.notes,
@@ -724,6 +749,9 @@ def receipt(db: Session, principal: AuthPrincipal, sale_id: UUID) -> ReceiptResp
                 method=payment.method,
                 amount=payment.amount,
                 provider_reference=payment.provider_reference,
+                payer_phone=payment.payer_phone,
+                payer_name=payment.payer_name,
+                payer_account_reference=payment.payer_account_reference,
                 paid_at=payment.paid_at,
             )
             for payment in payments

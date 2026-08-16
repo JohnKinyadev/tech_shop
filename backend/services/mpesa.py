@@ -158,6 +158,7 @@ def initiate_sale_stk_push(
         raise ValidationError("payment exceeds the outstanding sale amount")
 
     phone_number = _normalize_phone(payload.phone_number)
+    account_reference = _account_reference(sale.invoice_number)
     shortcode = settings.mpesa_shortcode.strip()
     passkey = _configured_value(settings.mpesa_passkey, "passkey")
     timestamp = _timestamp()
@@ -171,7 +172,7 @@ def initiate_sale_stk_push(
         "PartyB": shortcode,
         "PhoneNumber": phone_number,
         "CallBackURL": settings.mpesa_stk_callback_url,
-        "AccountReference": _account_reference(sale.invoice_number),
+        "AccountReference": account_reference,
         "TransactionDesc": payload.notes or f"Payment for {sale.invoice_number}",
     }
 
@@ -215,12 +216,15 @@ def initiate_sale_stk_push(
         amount=amount,
         currency="KES",
         provider_reference=checkout_request_id,
+        payer_phone=phone_number,
+        payer_account_reference=account_reference,
         idempotency_key=payload.idempotency_key,
         provider_payload={
             "merchant_request_id": merchant_request_id,
             "checkout_request_id": checkout_request_id,
             "customer_message": customer_message,
             "phone_number": phone_number,
+            "account_reference": account_reference,
             "amount": str(amount),
             "callback_url": settings.mpesa_stk_callback_url,
             "response": response_payload,

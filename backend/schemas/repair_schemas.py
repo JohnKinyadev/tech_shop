@@ -79,6 +79,9 @@ class RepairPaymentCreate(BaseSchema):
     method: PaymentMethod
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     provider_reference: str | None = Field(default=None, max_length=150)
+    payer_phone: str | None = Field(default=None, max_length=20)
+    payer_name: str | None = Field(default=None, max_length=150)
+    payer_account_reference: str | None = Field(default=None, max_length=150)
     idempotency_key: str = Field(min_length=8, max_length=150)
     notes: str | None = Field(default=None, max_length=500)
 
@@ -127,6 +130,9 @@ class RepairInvoicePayment(BaseSchema):
     method: PaymentMethod
     amount: Decimal
     provider_reference: str | None
+    payer_phone: str | None
+    payer_name: str | None
+    payer_account_reference: str | None
     paid_at: datetime | None
 
 

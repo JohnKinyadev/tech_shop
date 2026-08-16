@@ -461,6 +461,9 @@ export function PosPage() {
         amount: repairPaymentValue,
         provider_reference:
           repairPaymentMethod === "cash" ? null : repairPaymentReference.trim(),
+        payer_phone: selectedRepairInvoice.customer_phone,
+        payer_name: selectedRepairInvoice.customer_name,
+        payer_account_reference: selectedRepairInvoice.ticket_number,
         idempotency_key: idempotencyKey(),
         notes: repairPaymentNotes.trim() || "Repair pickup payment received at POS",
       });
@@ -742,6 +745,14 @@ export function PosPage() {
 
   function printReceipt() {
     window.print();
+  }
+
+  function payerDetails(accountReference?: string | null) {
+    return {
+      payer_phone: customerPhone.trim() || null,
+      payer_name: customerName.trim() || null,
+      payer_account_reference: accountReference?.trim() || null,
+    };
   }
 
   function addToCart(product: PosProduct) {
@@ -1086,6 +1097,7 @@ export function PosPage() {
         amount,
         status: "failed",
         provider_reference: paymentReference.trim() || null,
+        ...payerDetails(paymentReference),
         idempotency_key: idempotencyKey(),
         notes: "Card declined at payment terminal.",
       });
@@ -1120,6 +1132,7 @@ export function PosPage() {
       method,
       amount,
       provider_reference: method === "cash" ? null : providerReference?.trim() || null,
+      ...payerDetails(method === "cash" ? null : providerReference),
       idempotency_key: idempotencyKey(),
       notes: `POS ${method} payment`,
     });
@@ -1266,6 +1279,7 @@ export function PosPage() {
         method: paymentMethod,
         amount: outstanding,
         provider_reference: paymentMethod === "cash" ? null : paymentReference.trim(),
+        ...payerDetails(paymentMethod === "cash" ? null : paymentReference),
         idempotency_key: idempotencyKey(),
         notes: `POS ${paymentMethod} payment`,
       });
@@ -2272,6 +2286,7 @@ export function PosPage() {
                   <span key={`${payment.method}-${payment.paid_at ?? payment.amount}`}>
                     {payment.method.toUpperCase()} / {money(Number(payment.amount))}
                     {payment.provider_reference ? ` / Ref ${payment.provider_reference}` : ""}
+                    {payment.payer_phone ? ` / Payer ${payment.payer_phone}` : ""}
                     {` / ${dateLabel(payment.paid_at)}`}
                   </span>
                 ))}
@@ -2388,6 +2403,7 @@ export function PosPage() {
                   <span key={`${payment.method}-${payment.paid_at ?? payment.amount}`}>
                     {payment.method.toUpperCase()} / {money(Number(payment.amount))}
                     {payment.provider_reference ? ` / Ref ${payment.provider_reference}` : ""}
+                    {payment.payer_phone ? ` / Payer ${payment.payer_phone}` : ""}
                     {` / ${dateLabel(payment.paid_at)}`}
                   </span>
                 ))}

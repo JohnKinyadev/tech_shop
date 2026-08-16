@@ -18,6 +18,9 @@ class PaymentCreate(BaseSchema):
     method: PaymentMethod
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     currency: str = Field(default="KES", min_length=3, max_length=3)
+    payer_phone: str | None = Field(default=None, max_length=20)
+    payer_name: str | None = Field(default=None, max_length=150)
+    payer_account_reference: str | None = Field(default=None, max_length=150)
     idempotency_key: str = Field(min_length=8, max_length=150)
     notes: str | None = Field(default=None, max_length=500)
 
@@ -33,6 +36,9 @@ class SalePaymentCreate(BaseSchema):
     method: PaymentMethod
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     provider_reference: str | None = Field(default=None, max_length=150)
+    payer_phone: str | None = Field(default=None, max_length=20)
+    payer_name: str | None = Field(default=None, max_length=150)
+    payer_account_reference: str | None = Field(default=None, max_length=150)
     idempotency_key: str = Field(min_length=8, max_length=150)
     notes: str | None = Field(default=None, max_length=500)
 
@@ -42,6 +48,9 @@ class FailedPaymentAttemptCreate(BaseSchema):
     amount: Decimal = Field(gt=0, max_digits=14, decimal_places=2)
     status: PaymentStatus = PaymentStatus.FAILED
     provider_reference: str | None = Field(default=None, max_length=150)
+    payer_phone: str | None = Field(default=None, max_length=20)
+    payer_name: str | None = Field(default=None, max_length=150)
+    payer_account_reference: str | None = Field(default=None, max_length=150)
     idempotency_key: str = Field(min_length=8, max_length=150)
     notes: str | None = Field(default=None, max_length=500)
 
@@ -77,6 +86,9 @@ class PaymentResponse(ModelResponse):
     amount: Decimal
     currency: str
     provider_reference: str | None
+    payer_phone: str | None
+    payer_name: str | None
+    payer_account_reference: str | None
     paid_at: datetime | None
     notes: str | None
 

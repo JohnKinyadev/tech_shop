@@ -173,6 +173,9 @@ class ReceiptPaymentLine(BaseSchema):
     method: PaymentMethod
     amount: Decimal
     provider_reference: str | None
+    payer_phone: str | None
+    payer_name: str | None
+    payer_account_reference: str | None
     paid_at: datetime | None
 
 

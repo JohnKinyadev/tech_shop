@@ -255,6 +255,9 @@ export type SalePaymentPayload = {
   method: "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit";
   amount: string | number;
   provider_reference?: string | null;
+  payer_phone?: string | null;
+  payer_name?: string | null;
+  payer_account_reference?: string | null;
   idempotency_key: string;
   notes?: string | null;
 };
@@ -264,6 +267,9 @@ export type FailedPaymentAttemptPayload = {
   amount: string | number;
   status: "failed" | "cancelled";
   provider_reference?: string | null;
+  payer_phone?: string | null;
+  payer_name?: string | null;
+  payer_account_reference?: string | null;
   idempotency_key: string;
   notes?: string | null;
 };
@@ -297,6 +303,9 @@ export type Payment = ModelResponse & {
   amount: string;
   currency: string;
   provider_reference: string | null;
+  payer_phone: string | null;
+  payer_name: string | null;
+  payer_account_reference: string | null;
   paid_at: string | null;
   notes: string | null;
 };
@@ -330,6 +339,9 @@ export type Receipt = {
     method: string;
     amount: string;
     provider_reference: string | null;
+    payer_phone: string | null;
+    payer_name: string | null;
+    payer_account_reference: string | null;
     paid_at: string | null;
   }>;
   subtotal: string;
@@ -916,6 +928,9 @@ export type RepairPaymentPayload = {
   method: "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit";
   amount: string | number;
   provider_reference?: string | null;
+  payer_phone?: string | null;
+  payer_name?: string | null;
+  payer_account_reference?: string | null;
   idempotency_key: string;
   notes?: string | null;
 };
@@ -938,6 +953,9 @@ export type RepairInvoice = {
     method: string;
     amount: string;
     provider_reference: string | null;
+    payer_phone: string | null;
+    payer_name: string | null;
+    payer_account_reference: string | null;
     paid_at: string | null;
   }>;
 };

@@ -121,6 +121,9 @@ def _invoice_response(
                 method=payment.method,
                 amount=payment.amount,
                 provider_reference=payment.provider_reference,
+                payer_phone=payment.payer_phone,
+                payer_name=payment.payer_name,
+                payer_account_reference=payment.payer_account_reference,
                 paid_at=payment.paid_at,
             )
             for payment in payments
@@ -244,6 +247,9 @@ def add_payment(
         amount=money(payload.amount),
         currency="KES",
         provider_reference=payload.provider_reference,
+        payer_phone=payload.payer_phone,
+        payer_name=payload.payer_name,
+        payer_account_reference=payload.payer_account_reference,
         idempotency_key=payload.idempotency_key,
         paid_at=now,
         notes=payload.notes,

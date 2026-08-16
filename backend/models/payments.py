@@ -66,6 +66,13 @@ class Payment(BaseModel):
     provider_reference: Mapped[str | None] = mapped_column(
         String(150), unique=True, nullable=True
     )
+    payer_phone: Mapped[str | None] = mapped_column(
+        String(20), nullable=True, index=True
+    )
+    payer_name: Mapped[str | None] = mapped_column(String(150), nullable=True)
+    payer_account_reference: Mapped[str | None] = mapped_column(
+        String(150), nullable=True
+    )
     idempotency_key: Mapped[str] = mapped_column(
         String(150), unique=True, nullable=False
     )
