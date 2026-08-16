@@ -288,7 +288,11 @@ def assign_technician(
     payload: RepairAssignmentUpdate,
 ) -> RepairTicketView:
     ticket = get_ticket_model(
-        db, principal, ticket_id, permission="repairs.assign", lock=True
+        db,
+        principal,
+        ticket_id,
+        any_permission=("repairs.assign", "sales.process"),
+        lock=True,
     )
     if ticket.status in {
         RepairStatus.READY_FOR_PICKUP,

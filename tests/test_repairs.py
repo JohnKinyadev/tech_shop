@@ -1,4 +1,5 @@
 from types import SimpleNamespace
+from datetime import datetime, timezone
 from uuid import uuid4
 
 import pytest
@@ -79,6 +80,57 @@ def test_cashier_can_list_ready_repair_pickups(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json() == []
+
+
+def test_cashier_can_assign_repair_to_technician(monkeypatch) -> None:
+    actor = principal(CASHIER, {"sales.process"})
+    technician_id = uuid4()
+    use_principal(actor)
+    app.dependency_overrides[get_db] = lambda: SimpleNamespace(commit=lambda: None)
+
+    def fake_assign(db, principal, ticket_id, payload):
+        now = datetime.now(timezone.utc)
+        assert principal == actor
+        assert payload.technician_id == technician_id
+        return {
+            "id": ticket_id,
+            "created_at": now,
+            "updated_at": now,
+            "is_deleted": False,
+            "ticket_number": "REP-0001",
+            "branch_id": actor.branch_id,
+            "customer_id": uuid4(),
+            "technician_id": technician_id,
+            "serialized_unit_id": None,
+            "status": "received",
+            "device_type": "Phone",
+            "device_brand": "Samsung",
+            "device_model": "A15",
+            "serial_number": None,
+            "imei": None,
+            "reported_issue": "Screen is cracked",
+            "diagnosis": None,
+            "intake_condition": "Cracked screen",
+            "intake_images": [],
+            "accessories_received": [],
+            "labor_estimate": "0.00",
+            "parts_estimate": "0.00",
+            "approved_at": None,
+            "booked_for": None,
+            "received_at": now,
+            "ready_at": None,
+            "collected_at": None,
+            "parts": [],
+            "status_history": [],
+        }
+
+    monkeypatch.setattr(repair_service, "assign_technician", fake_assign)
+    response = TestClient(app).patch(
+        f"/api/v1/staff/repairs/{uuid4()}/assignment",
+        json={"technician_id": str(technician_id)},
+    )
+    assert response.status_code == 200
+    assert response.json()["technician_id"] == str(technician_id)
 
 
 def test_inventory_manager_cannot_access_repairs() -> None:

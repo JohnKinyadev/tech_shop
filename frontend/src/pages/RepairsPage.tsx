@@ -210,7 +210,10 @@ export function RepairsPage() {
     repairRoleName.includes("reception");
   const showReceptionRepairIntake = isPreview || isCashierRepairProfile;
   const canManageRepairAssignment =
-    isPreview || isAdminRepairProfile || isBranchManagerRepairProfile;
+    isPreview ||
+    isAdminRepairProfile ||
+    isBranchManagerRepairProfile ||
+    isCashierRepairProfile;
   const showTechnicianRepairWorkbench = isPreview || isTechnicianRepairProfile;
   const showCashierRepairHandoff = isPreview || isCashierRepairProfile;
   const canCancelRepairFromDesk =

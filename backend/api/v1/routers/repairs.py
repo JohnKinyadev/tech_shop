@@ -114,7 +114,7 @@ def record_repair_intake(
 def assign_repair(
     ticket_id: UUID,
     payload: RepairAssignmentUpdate,
-    principal: RepairAssignPrincipal,
+    principal: CurrentPrincipal,
     db: DatabaseSession,
 ) -> RepairTicketView:
     item = repair_service.assign_technician(db, principal, ticket_id, payload)
