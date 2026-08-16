@@ -1,7 +1,7 @@
 from datetime import datetime, timezone
 from uuid import UUID, uuid4
 
-from sqlalchemy import func, select
+from sqlalchemy import func, or_, select
 from sqlalchemy.orm import Session
 
 from backend.core.permissions import ADMIN, BRANCH_MANAGER, TECHNICIAN
@@ -112,6 +112,10 @@ def _enforce_any_permission(
     )
 
 
+def _technician_role_filter():
+    return or_(Role.code == TECHNICIAN, func.lower(Role.name).like("%technician%"))
+
+
 def get_ticket_model(
     db: Session,
     principal: AuthPrincipal,
@@ -172,6 +176,34 @@ def list_tickets(
         .limit(page_size)
     ).all()
     return [_ticket_response(db, ticket) for ticket in tickets], total
+
+
+def list_branch_technicians(
+    db: Session, principal: AuthPrincipal, branch_id: UUID
+) -> list[User]:
+    _enforce_any_permission(
+        principal,
+        "repairs.view",
+        "repairs.assign",
+        "repairs.update",
+        "sales.process",
+    )
+    enforce_branch_scope(principal, branch_id)
+    return list(
+        db.scalars(
+            select(User)
+            .join(Role, Role.id == User.role_id)
+            .where(
+                User.branch_id == branch_id,
+                User.is_active.is_(True),
+                User.is_deleted.is_(False),
+                _technician_role_filter(),
+                Role.is_active.is_(True),
+                Role.is_deleted.is_(False),
+            )
+            .order_by(User.full_name)
+        ).all()
+    )
 
 
 def get_ticket(
@@ -308,8 +340,9 @@ def assign_technician(
             User.branch_id == ticket.branch_id,
             User.is_active.is_(True),
             User.is_deleted.is_(False),
-            Role.code == TECHNICIAN,
+            _technician_role_filter(),
             Role.is_active.is_(True),
+            Role.is_deleted.is_(False),
         )
     )
     if technician is None:

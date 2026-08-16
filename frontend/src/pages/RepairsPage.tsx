@@ -16,6 +16,7 @@ import {
   listCatalogProducts,
   listCustomers,
   listRepairs,
+  listRepairTechnicians,
   listSerializedUnits,
   listStaffUsers,
   markRepairReady,
@@ -463,12 +464,23 @@ export function RepairsPage() {
     if (!token || isPreview) return;
 
     let active = true;
+    const technicianBranchId = selectedBranchId || user?.branch_id || "";
     Promise.allSettled([
       listBranches(token),
       listCustomers(token),
       listStaffUsers(token),
       listAssignableRoles(token),
-    ]).then(([branchesResult, customersResult, usersResult, rolesResult]) => {
+      technicianBranchId
+        ? listRepairTechnicians(token, technicianBranchId)
+        : Promise.resolve([]),
+    ]).then(
+      ([
+        branchesResult,
+        customersResult,
+        usersResult,
+        rolesResult,
+        techniciansResult,
+      ]) => {
       if (!active) return;
       let failed = false;
 
@@ -499,15 +511,24 @@ export function RepairsPage() {
       }
 
       if (usersResult.status === "fulfilled") {
-        setStaffUsers(usersResult.value);
+        const repairTechnicians =
+          techniciansResult.status === "fulfilled" ? techniciansResult.value : [];
+        const mergedUsers = [
+          ...usersResult.value,
+          ...repairTechnicians.filter(
+            (technician) =>
+              !usersResult.value.some((staff) => staff.id === technician.id),
+          ),
+        ];
+        setStaffUsers(mergedUsers);
+      } else if (techniciansResult.status === "fulfilled") {
+        setStaffUsers(techniciansResult.value);
       } else {
         failed = true;
       }
 
       if (rolesResult.status === "fulfilled") {
         setRoles(rolesResult.value);
-      } else {
-        failed = true;
       }
 
         setNotice(failed ? "Some repair reference data is unavailable. Local preview data remains visible where needed." : null);
@@ -516,7 +537,7 @@ export function RepairsPage() {
     return () => {
       active = false;
     };
-  }, [isPreview, token, user?.branch_id]);
+  }, [isPreview, selectedBranchId, token, user?.branch_id]);
 
   useEffect(() => {
     if (!token || isPreview || !selectedBranchId) return;

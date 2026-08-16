@@ -25,6 +25,7 @@ from backend.schemas.repair_schemas import (
     RepairStatusUpdate,
     RepairTicketView,
 )
+from backend.schemas.user_schemas import UserResponse
 from backend.services import repair_billing
 from backend.services import repairs as repair_service
 from backend.services.auth import AuthPrincipal
@@ -87,6 +88,18 @@ def list_repair_pickups(
     db: DatabaseSession,
 ) -> list[RepairInvoiceResponse]:
     return repair_billing.list_ready_pickups(db, principal, branch_id)
+
+
+@router.get("/technicians", response_model=list[UserResponse])
+def list_repair_technicians(
+    branch_id: UUID,
+    principal: CurrentPrincipal,
+    db: DatabaseSession,
+) -> list[UserResponse]:
+    return [
+        UserResponse.model_validate(user)
+        for user in repair_service.list_branch_technicians(db, principal, branch_id)
+    ]
 
 
 @router.get("/{ticket_id}", response_model=RepairTicketView)

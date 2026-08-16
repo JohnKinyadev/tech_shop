@@ -819,6 +819,13 @@ export function listRepairPickups(token: string, branchId: string) {
   });
 }
 
+export function listRepairTechnicians(token: string, branchId: string) {
+  return apiRequest<StaffUser[]>("/repairs/technicians", {
+    token,
+    query: { branch_id: branchId },
+  });
+}
+
 export function createRepairBooking(token: string, body: RepairBookingPayload) {
   return apiRequest<RepairTicket>("/repairs", {
     token,

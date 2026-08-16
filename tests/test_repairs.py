@@ -53,6 +53,7 @@ def test_repair_routes_are_exposed() -> None:
     assert "/api/v1/staff/repairs/{ticket_id}/parts" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/ready" in paths
     assert "/api/v1/staff/repairs/pickups" in paths
+    assert "/api/v1/staff/repairs/technicians" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/invoice" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/payments" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/collect" in paths
@@ -76,6 +77,20 @@ def test_cashier_can_list_ready_repair_pickups(monkeypatch) -> None:
     monkeypatch.setattr(repair_billing, "list_ready_pickups", lambda *args, **kwargs: [])
     response = TestClient(app).get(
         "/api/v1/staff/repairs/pickups",
+        params={"branch_id": str(actor.branch_id)},
+    )
+    assert response.status_code == 200
+    assert response.json() == []
+
+
+def test_cashier_can_list_branch_repair_technicians(monkeypatch) -> None:
+    actor = principal(CASHIER, {"sales.process"})
+    use_principal(actor)
+    monkeypatch.setattr(
+        repair_service, "list_branch_technicians", lambda *args, **kwargs: []
+    )
+    response = TestClient(app).get(
+        "/api/v1/staff/repairs/technicians",
         params={"branch_id": str(actor.branch_id)},
     )
     assert response.status_code == 200
