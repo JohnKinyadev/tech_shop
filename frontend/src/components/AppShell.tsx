@@ -70,8 +70,9 @@ const navItems: NavItem[] = [
     key: "repairs",
     label: "Repairs",
     description: "Device intake, diagnosis, parts usage, payments, and collection.",
-    roles: ["admin", "owner", "branch_manager", "technician"],
+    roles: ["admin", "owner", "branch_manager", "technician", "cashier"],
     permissions: [
+      "sales.process",
       "repairs.view",
       "repairs.assign",
       "repairs.update",

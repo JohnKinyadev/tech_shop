@@ -205,7 +205,10 @@ export function RepairsPage() {
   const isTechnicianRepairProfile =
     repairRoleCode === "technician" || repairRoleName.includes("technician");
   const isCashierRepairProfile =
-    repairRoleCode === "cashier" || repairRoleName.includes("cashier");
+    repairRoleCode === "cashier" ||
+    repairRoleName.includes("cashier") ||
+    repairRoleName.includes("reception");
+  const showReceptionRepairIntake = isPreview || isCashierRepairProfile;
   const canManageRepairAssignment =
     isPreview || isAdminRepairProfile || isBranchManagerRepairProfile;
   const showTechnicianRepairWorkbench = isPreview || isTechnicianRepairProfile;
@@ -603,6 +606,10 @@ export function RepairsPage() {
 
   useEffect(() => {
     if (!selectedTicket || !token || isPreview) return;
+    if (!showCashierRepairHandoff) {
+      setInvoice(null);
+      return;
+    }
     if (!invoiceEligible(selectedTicket.status)) return;
 
     let active = true;
@@ -626,7 +633,13 @@ export function RepairsPage() {
     return () => {
       active = false;
     };
-  }, [isPreview, selectedTicket?.id, selectedTicket?.status, token]);
+  }, [
+    isPreview,
+    selectedTicket?.id,
+    selectedTicket?.status,
+    showCashierRepairHandoff,
+    token,
+  ]);
 
   useEffect(() => {
     if (!partVariantOptions.length) return;
@@ -1571,14 +1584,15 @@ export function RepairsPage() {
       </section>
 
       <div className="repair-workspace repair-workspace--ticket-flow m-t">
-        <section className="panel-card">
-          <header className="panel-card__header">
-            <div>
-              <p className="eyebrow">New ticket</p>
-              <h2>Device intake</h2>
-            </div>
-          </header>
-          <form className="form-panel" onSubmit={handleCreateTicket}>
+        {showReceptionRepairIntake && (
+          <section className="panel-card">
+            <header className="panel-card__header">
+              <div>
+                <p className="eyebrow">New ticket</p>
+                <h2>Device intake</h2>
+              </div>
+            </header>
+            <form className="form-panel" onSubmit={handleCreateTicket}>
             <div className="form-grid form-grid--two">
               <label>
                 Customer
@@ -1858,8 +1872,9 @@ export function RepairsPage() {
                 Create Repair Ticket
               </button>
             </div>
-          </form>
-        </section>
+            </form>
+          </section>
+        )}
 
         <section className="panel-card">
           <header className="panel-card__header">
@@ -2231,69 +2246,75 @@ export function RepairsPage() {
                   </form>
                 )}
 
-                <div className="action-form">
-                  <div className="repair-form-hint">
-                    <span>Invoice</span>
-                    <strong>
-                      {derivedInvoice
-                        ? `${money(derivedInvoice.due)} due`
-                        : "Not invoice-ready"}
-                    </strong>
-                  </div>
-                  {derivedInvoice ? (
-                    <div className="repair-invoice-card">
-                      <div>
-                        <span>Labor</span>
-                        <strong>{money(derivedInvoice.labor)}</strong>
-                      </div>
-                      <div>
-                        <span>Parts</span>
-                        <strong>{money(derivedInvoice.parts)}</strong>
-                      </div>
-                      <div>
-                        <span>Total</span>
-                        <strong>{money(derivedInvoice.total)}</strong>
-                      </div>
-                      <div>
-                        <span>Paid</span>
-                        <strong>{money(derivedInvoice.paid)}</strong>
-                      </div>
-                      <div>
-                        <span>Balance</span>
-                        <strong>{money(derivedInvoice.due)}</strong>
-                      </div>
+                {showTechnicianRepairWorkbench && (
+                  <div className="action-form">
+                    <div className="repair-form-hint">
+                      <span>Repair completion</span>
+                      <strong>
+                        {selectedTicket.status === "repairing"
+                          ? "Ready after testing"
+                          : titleize(selectedTicket.status)}
+                      </strong>
                     </div>
-                  ) : (
-                    <p className="muted">
-                      Invoice appears after the quote is approved.
-                    </p>
-                  )}
+                    <label>
+                      Ready note
+                      <textarea
+                        value={readyNote}
+                        onChange={(event) => setReadyNote(event.target.value)}
+                        placeholder="Testing complete, customer notified..."
+                      />
+                    </label>
+                    <button
+                      className="secondary-button"
+                      disabled={busy || selectedTicket.status !== "repairing"}
+                      onClick={() => void handleMarkReady()}
+                      type="button"
+                    >
+                      Mark Ready for Pickup
+                    </button>
+                  </div>
+                )}
 
-                  {showTechnicianRepairWorkbench ? (
-                    <>
-                      <label>
-                        Ready note
-                        <textarea
-                          value={readyNote}
-                          onChange={(event) => setReadyNote(event.target.value)}
-                          placeholder="Testing complete, customer notified..."
-                        />
-                      </label>
-                      <button
-                        className="secondary-button"
-                        disabled={busy || selectedTicket.status !== "repairing"}
-                        onClick={() => void handleMarkReady()}
-                        type="button"
-                      >
-                        Mark Ready for Pickup
-                      </button>
-                    </>
-                  ) : (
-                    <p className="muted">
-                      The technician marks the device ready after repair and testing.
-                    </p>
-                  )}
-                </div>
+                {showCashierRepairHandoff && (
+                  <div className="action-form">
+                    <div className="repair-form-hint">
+                      <span>Invoice</span>
+                      <strong>
+                        {derivedInvoice
+                          ? `${money(derivedInvoice.due)} due`
+                          : "Not invoice-ready"}
+                      </strong>
+                    </div>
+                    {derivedInvoice ? (
+                      <div className="repair-invoice-card">
+                        <div>
+                          <span>Labor</span>
+                          <strong>{money(derivedInvoice.labor)}</strong>
+                        </div>
+                        <div>
+                          <span>Parts</span>
+                          <strong>{money(derivedInvoice.parts)}</strong>
+                        </div>
+                        <div>
+                          <span>Total</span>
+                          <strong>{money(derivedInvoice.total)}</strong>
+                        </div>
+                        <div>
+                          <span>Paid</span>
+                          <strong>{money(derivedInvoice.paid)}</strong>
+                        </div>
+                        <div>
+                          <span>Balance</span>
+                          <strong>{money(derivedInvoice.due)}</strong>
+                        </div>
+                      </div>
+                    ) : (
+                      <p className="muted">
+                        Invoice appears after the quote is approved.
+                      </p>
+                    )}
+                  </div>
+                )}
 
                 {showCashierRepairHandoff && (
                   <form onSubmit={handleRepairPayment} className="action-form">

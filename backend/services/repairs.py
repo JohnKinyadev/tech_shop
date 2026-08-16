@@ -100,15 +100,31 @@ def _enforce_ticket_scope(principal: AuthPrincipal, ticket: RepairTicket) -> Non
         raise AuthorizationError("technicians can only access assigned repair tickets")
 
 
+def _enforce_any_permission(
+    principal: AuthPrincipal, *permission_codes: str
+) -> None:
+    if principal.role_code == ADMIN:
+        return
+    if principal.permissions.intersection(permission_codes):
+        return
+    raise AuthorizationError(
+        "missing one of permissions: " + ", ".join(permission_codes)
+    )
+
+
 def get_ticket_model(
     db: Session,
     principal: AuthPrincipal,
     ticket_id: UUID,
     *,
     permission: str = "repairs.view",
+    any_permission: tuple[str, ...] | None = None,
     lock: bool = False,
 ) -> RepairTicket:
-    enforce_permission(principal, permission)
+    if any_permission is None:
+        enforce_permission(principal, permission)
+    else:
+        _enforce_any_permission(principal, *any_permission)
     statement = select(RepairTicket).where(
         RepairTicket.id == ticket_id,
         RepairTicket.is_deleted.is_(False),
@@ -132,7 +148,7 @@ def list_tickets(
     status: RepairStatus | None = None,
     technician_id: UUID | None = None,
 ) -> tuple[list[RepairTicketView], int]:
-    enforce_permission(principal, "repairs.view")
+    _enforce_any_permission(principal, "repairs.view", "sales.process")
     enforce_branch_scope(principal, branch_id)
     conditions = [
         RepairTicket.branch_id == branch_id,
@@ -161,13 +177,21 @@ def list_tickets(
 def get_ticket(
     db: Session, principal: AuthPrincipal, ticket_id: UUID
 ) -> RepairTicketView:
-    return _ticket_response(db, get_ticket_model(db, principal, ticket_id))
+    return _ticket_response(
+        db,
+        get_ticket_model(
+            db,
+            principal,
+            ticket_id,
+            any_permission=("repairs.view", "sales.process"),
+        ),
+    )
 
 
 def create_booking(
     db: Session, principal: AuthPrincipal, payload: RepairBookingCreate
 ) -> RepairTicketView:
-    enforce_permission(principal, "repairs.assign")
+    _enforce_any_permission(principal, "repairs.assign", "sales.process")
     enforce_branch_scope(principal, payload.branch_id)
     customer = db.scalar(
         select(Customer).where(
@@ -224,7 +248,11 @@ def record_intake(
     payload: RepairIntakeUpdate,
 ) -> RepairTicketView:
     ticket = get_ticket_model(
-        db, principal, ticket_id, permission="repairs.assign", lock=True
+        db,
+        principal,
+        ticket_id,
+        any_permission=("repairs.assign", "sales.process"),
+        lock=True,
     )
     if ticket.status not in {RepairStatus.BOOKED, RepairStatus.AWAITING_DROPOFF}:
         raise ConflictError("only booked repairs can be received")
@@ -324,7 +352,11 @@ def decide_quote(
     payload: RepairQuoteDecision,
 ) -> RepairTicketView:
     ticket = get_ticket_model(
-        db, principal, ticket_id, permission="repairs.update", lock=True
+        db,
+        principal,
+        ticket_id,
+        any_permission=("repairs.update", "sales.process"),
+        lock=True,
     )
     if ticket.status != RepairStatus.QUOTE_PENDING:
         raise ConflictError("repair quote is not awaiting a decision")

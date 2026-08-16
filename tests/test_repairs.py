@@ -57,14 +57,16 @@ def test_repair_routes_are_exposed() -> None:
     assert "/api/v1/staff/repairs/{ticket_id}/collect" in paths
 
 
-def test_cashier_cannot_list_repair_tickets() -> None:
+def test_cashier_can_list_repair_reception_queue(monkeypatch) -> None:
     actor = principal(CASHIER, {"sales.process"})
     use_principal(actor)
+    monkeypatch.setattr(repair_service, "list_tickets", lambda *args, **kwargs: ([], 0))
     response = TestClient(app).get(
         "/api/v1/staff/repairs",
         params={"branch_id": str(actor.branch_id)},
     )
-    assert response.status_code == 403
+    assert response.status_code == 200
+    assert response.json()["items"] == []
 
 
 def test_cashier_can_list_ready_repair_pickups(monkeypatch) -> None:

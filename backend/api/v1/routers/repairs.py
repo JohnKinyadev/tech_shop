@@ -30,9 +30,6 @@ from backend.services import repairs as repair_service
 from backend.services.auth import AuthPrincipal
 
 router = APIRouter(prefix="/repairs", tags=["staff-repairs"])
-RepairViewPrincipal = Annotated[
-    AuthPrincipal, Depends(require_permission("repairs.view"))
-]
 RepairAssignPrincipal = Annotated[
     AuthPrincipal, Depends(require_permission("repairs.assign"))
 ]
@@ -47,7 +44,7 @@ RepairClosePrincipal = Annotated[
 @router.get("", response_model=Page[RepairTicketView])
 def list_repairs(
     branch_id: UUID,
-    principal: RepairViewPrincipal,
+    principal: CurrentPrincipal,
     db: DatabaseSession,
     page: int = Query(default=1, ge=1),
     page_size: int = Query(default=50, ge=1, le=200),
@@ -75,7 +72,7 @@ def list_repairs(
 )
 def create_repair_booking(
     payload: RepairBookingCreate,
-    principal: RepairAssignPrincipal,
+    principal: CurrentPrincipal,
     db: DatabaseSession,
 ) -> RepairTicketView:
     item = repair_service.create_booking(db, principal, payload)
@@ -95,7 +92,7 @@ def list_repair_pickups(
 @router.get("/{ticket_id}", response_model=RepairTicketView)
 def get_repair(
     ticket_id: UUID,
-    principal: RepairViewPrincipal,
+    principal: CurrentPrincipal,
     db: DatabaseSession,
 ) -> RepairTicketView:
     return repair_service.get_ticket(db, principal, ticket_id)
@@ -105,7 +102,7 @@ def get_repair(
 def record_repair_intake(
     ticket_id: UUID,
     payload: RepairIntakeUpdate,
-    principal: RepairAssignPrincipal,
+    principal: CurrentPrincipal,
     db: DatabaseSession,
 ) -> RepairTicketView:
     item = repair_service.record_intake(db, principal, ticket_id, payload)
@@ -141,7 +138,7 @@ def submit_repair_diagnosis(
 def decide_repair_quote(
     ticket_id: UUID,
     payload: RepairQuoteDecision,
-    principal: RepairUpdatePrincipal,
+    principal: CurrentPrincipal,
     db: DatabaseSession,
 ) -> RepairTicketView:
     item = repair_service.decide_quote(db, principal, ticket_id, payload)
