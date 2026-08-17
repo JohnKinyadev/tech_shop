@@ -414,6 +414,7 @@ matching `backend/schemas/*_schemas.py` file or in Swagger.
 | GET | `/repairs` | `branch_id`, `page`, `page_size`, `status`, `technician_id` query | - | Lists repair tickets |
 | POST | `/repairs` | - | `RepairBookingCreate` | Creates repair booking |
 | GET | `/repairs/{ticket_id}` | `ticket_id` path | - | Gets repair ticket |
+| GET | `/repairs/{ticket_id}/available-parts` | `ticket_id` path, `query`, `page`, `page_size` query | - | Lists branch-available parts for a repair ticket |
 | POST | `/repairs/{ticket_id}/intake` | `ticket_id` path | `RepairIntakeUpdate` | Records device intake |
 | PATCH | `/repairs/{ticket_id}/assignment` | `ticket_id` path | `RepairAssignmentUpdate` | Assigns technician |
 | POST | `/repairs/{ticket_id}/diagnosis` | `ticket_id` path | `RepairDiagnosisUpdate` | Assigned technician submits or edits diagnosis/quote before customer approval |

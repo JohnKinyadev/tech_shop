@@ -20,6 +20,7 @@ from backend.schemas.repair_schemas import (
     RepairInvoiceResponse,
     RepairNote,
     RepairPartCreate,
+    RepairPartOption,
     RepairPaymentCreate,
     RepairQuoteDecision,
     RepairStatusUpdate,
@@ -100,6 +101,28 @@ def list_repair_technicians(
         UserResponse.model_validate(user)
         for user in repair_service.list_branch_technicians(db, principal, branch_id)
     ]
+
+
+@router.get("/{ticket_id}/available-parts", response_model=Page[RepairPartOption])
+def list_repair_available_parts(
+    ticket_id: UUID,
+    principal: CurrentPrincipal,
+    db: DatabaseSession,
+    page: int = Query(default=1, ge=1),
+    page_size: int = Query(default=100, ge=1, le=200),
+    query: str | None = Query(default=None, min_length=1, max_length=150),
+) -> Page[RepairPartOption]:
+    items, total = repair_service.list_available_parts(
+        db,
+        principal,
+        ticket_id,
+        query=query,
+        page=page,
+        page_size=page_size,
+    )
+    return Page[RepairPartOption](
+        items=items, total=total, page=page, page_size=page_size
+    )
 
 
 @router.get("/{ticket_id}", response_model=RepairTicketView)

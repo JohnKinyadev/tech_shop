@@ -4,7 +4,7 @@ from uuid import UUID
 
 from pydantic import Field
 
-from backend.models.enums import PaymentMethod, RepairStatus
+from backend.models.enums import PaymentMethod, RepairStatus, TrackingType
 from backend.schemas.base_schemas import BaseSchema, ModelResponse
 
 
@@ -58,6 +58,26 @@ class RepairPartView(ModelResponse):
     serialized_unit_id: UUID | None
     quantity: int
     unit_price: Decimal
+
+
+class RepairPartUnitOption(BaseSchema):
+    id: UUID
+    serial_number: str | None
+    imei: str | None
+    condition: str
+    received_at: datetime
+
+
+class RepairPartOption(BaseSchema):
+    product_id: UUID
+    product_name: str
+    variant_id: UUID
+    variant_name: str
+    sku: str
+    tracking_type: TrackingType
+    selling_price: Decimal
+    available_quantity: int
+    serialized_units: list[RepairPartUnitOption] = Field(default_factory=list)
 
 
 class RepairStatusUpdate(BaseSchema):

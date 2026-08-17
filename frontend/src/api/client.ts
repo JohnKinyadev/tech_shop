@@ -54,6 +54,7 @@ import type {
   RepairIntakePayload,
   RepairInvoice,
   RepairNotePayload,
+  RepairPartOption,
   RepairPartPayload,
   RepairPaymentPayload,
   RepairQuoteDecisionPayload,
@@ -891,6 +892,21 @@ export function updateRepairStatus(
     token,
     method: "POST",
     body,
+  });
+}
+
+export function listRepairAvailableParts(
+  token: string,
+  ticketId: string,
+  query = "",
+) {
+  return apiRequest<Page<RepairPartOption>>(`/repairs/${ticketId}/available-parts`, {
+    token,
+    query: {
+      query: query || undefined,
+      page: 1,
+      page_size: 100,
+    },
   });
 }
 

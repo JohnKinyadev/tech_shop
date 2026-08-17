@@ -25,6 +25,8 @@ from backend.schemas.repair_schemas import (
     RepairDiagnosisUpdate,
     RepairIntakeUpdate,
     RepairPartCreate,
+    RepairPartOption,
+    RepairPartUnitOption,
     RepairPartView,
     RepairQuoteDecision,
     RepairStatusHistoryResponse,
@@ -225,6 +227,102 @@ def get_ticket(
             any_permission=("repairs.view", "sales.process"),
         ),
     )
+
+
+def list_available_parts(
+    db: Session,
+    principal: AuthPrincipal,
+    ticket_id: UUID,
+    *,
+    query: str | None = None,
+    page: int,
+    page_size: int,
+) -> tuple[list[RepairPartOption], int]:
+    ticket = get_ticket_model(
+        db, principal, ticket_id, permission="repairs.update"
+    )
+    search_conditions = []
+    if query:
+        needle = f"%{query.strip()}%"
+        search_conditions.append(
+            or_(
+                Product.name.ilike(needle),
+                ProductVariant.name.ilike(needle),
+                ProductVariant.sku.ilike(needle),
+            )
+        )
+    conditions = [
+        StockBalance.branch_id == ticket.branch_id,
+        StockBalance.is_deleted.is_(False),
+        ProductVariant.is_active.is_(True),
+        ProductVariant.is_deleted.is_(False),
+        Product.is_active.is_(True),
+        Product.is_deleted.is_(False),
+        (StockBalance.quantity_on_hand - StockBalance.reserved_quantity) > 0,
+        *search_conditions,
+    ]
+    base = (
+        select(StockBalance, ProductVariant, Product)
+        .join(ProductVariant, ProductVariant.id == StockBalance.variant_id)
+        .join(Product, Product.id == ProductVariant.product_id)
+        .where(*conditions)
+    )
+    total = db.scalar(select(func.count()).select_from(base.subquery())) or 0
+    rows = db.execute(
+        base.order_by(Product.name, ProductVariant.name)
+        .offset((page - 1) * page_size)
+        .limit(page_size)
+    ).all()
+
+    serialized_variant_ids = [
+        variant.id
+        for _, variant, _ in rows
+        if variant.tracking_type != TrackingType.BULK
+    ]
+    units_by_variant: dict[UUID, list[RepairPartUnitOption]] = {}
+    if serialized_variant_ids:
+        units = db.scalars(
+            select(SerializedUnit)
+            .where(
+                SerializedUnit.branch_id == ticket.branch_id,
+                SerializedUnit.variant_id.in_(serialized_variant_ids),
+                SerializedUnit.status == SerializedUnitStatus.AVAILABLE,
+                SerializedUnit.is_deleted.is_(False),
+            )
+            .order_by(SerializedUnit.received_at, SerializedUnit.serial_number)
+        ).all()
+        for unit in units:
+            units_by_variant.setdefault(unit.variant_id, []).append(
+                RepairPartUnitOption(
+                    id=unit.id,
+                    serial_number=unit.serial_number,
+                    imei=unit.imei,
+                    condition=unit.condition,
+                    received_at=unit.received_at,
+                )
+            )
+
+    items: list[RepairPartOption] = []
+    for balance, variant, product in rows:
+        available = balance.quantity_on_hand - balance.reserved_quantity
+        if variant.tracking_type != TrackingType.BULK and not units_by_variant.get(
+            variant.id
+        ):
+            continue
+        items.append(
+            RepairPartOption(
+                product_id=product.id,
+                product_name=product.name,
+                variant_id=variant.id,
+                variant_name=variant.name,
+                sku=variant.sku,
+                tracking_type=variant.tracking_type,
+                selling_price=variant.selling_price,
+                available_quantity=available,
+                serialized_units=units_by_variant.get(variant.id, []),
+            )
+        )
+    return items, total
 
 
 def create_booking(

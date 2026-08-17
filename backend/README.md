@@ -130,6 +130,8 @@ the customer quote decision after communicating with the customer. Technicians c
 access assigned tickets; they submit diagnosis and quote estimates, edit pending quotes
 before customer approval, move repairs through the controlled status pipeline after
 approval, and log parts at server-controlled prices.
+The technician parts picker reads from stock available in the repair ticket's branch and
+only exposes safe sale/selection details, not inventory cost.
 Logged parts are deducted through the central inventory ledger and can be restored before a
 repair is closed if an entry was made in error.
 

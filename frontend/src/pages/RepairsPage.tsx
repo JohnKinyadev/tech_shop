@@ -11,13 +11,12 @@ import {
   currentTillSession,
   decideRepairQuote,
   getRepairInvoice,
+  listRepairAvailableParts,
   listAssignableRoles,
   listBranches,
-  listCatalogProducts,
   listCustomers,
   listRepairs,
   listRepairTechnicians,
-  listSerializedUnits,
   listStaffUsers,
   markRepairReady,
   recordRepairIntake,
@@ -29,12 +28,12 @@ import {
 import type {
   AssignableRole,
   Branch,
-  CatalogProduct,
   Customer,
   RepairInvoice,
+  RepairPartOption,
+  RepairPartUnitOption,
   RepairSummary,
   RepairTicket,
-  SerializedUnit,
   StaffUser,
   TillSession,
 } from "../api/types";
@@ -98,6 +97,8 @@ type VariantOption = {
   sku: string;
   trackingType: "bulk" | "serial" | "imei";
   price: number;
+  availableQuantity: number;
+  serializedUnits: RepairPartUnitOption[];
 };
 
 const emptyDiagnosisForm = {
@@ -142,6 +143,13 @@ function repairStageIndex(status?: string) {
   return index;
 }
 
+function allowedStatusOptions(ticket: RepairTicket) {
+  if (ticket.status === "received") return ["diagnosing"];
+  if (ticket.status === "customer_approved") return ["awaiting_parts", "repairing"];
+  if (ticket.status === "awaiting_parts") return ["repairing"];
+  return [];
+}
+
 function phoneImeiLooksValid(value: string) {
   return /^\d{15}$/.test(value.trim());
 }
@@ -149,18 +157,6 @@ function phoneImeiLooksValid(value: string) {
 function isUuid(value: string) {
   return /^[0-9a-f]{8}-[0-9a-f]{4}-[1-5][0-9a-f]{3}-[89ab][0-9a-f]{3}-[0-9a-f]{12}$/i.test(
     value,
-  );
-}
-
-function catalogToVariantOptions(products: CatalogProduct[]): VariantOption[] {
-  return products.flatMap((product) =>
-    product.variants.map((variant) => ({
-      id: variant.id,
-      label: `${product.name} / ${variant.name}`,
-      sku: variant.sku,
-      trackingType: variant.tracking_type,
-      price: Number(variant.selling_price),
-    })),
   );
 }
 
@@ -176,8 +172,7 @@ export function RepairsPage() {
   const [roles, setRoles] = useState<AssignableRole[]>(demoRoles);
   const [tickets, setTickets] = useState<RepairTicket[]>(demoRepairs);
   const [summary, setSummary] = useState<RepairSummary>(demoDashboard.repairs);
-  const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
-  const [serializedUnits, setSerializedUnits] = useState<SerializedUnit[]>([]);
+  const [availablePartOptions, setAvailablePartOptions] = useState<RepairPartOption[]>([]);
   const [tillSession, setTillSession] = useState<TillSession | null>(null);
   const [invoice, setInvoice] = useState<RepairInvoice | null>(null);
   const [selectedBranchId, setSelectedBranchId] = useState(
@@ -249,8 +244,35 @@ export function RepairsPage() {
             sku: product.sku,
             trackingType: product.trackingType,
             price: product.price,
+            availableQuantity: product.trackingType === "bulk" ? 12 : 1,
+            serializedUnits:
+              product.trackingType === "bulk"
+                ? []
+                : [
+                    {
+                      id: `${product.variantId}-unit-1`,
+                      serial_number:
+                        product.trackingType === "serial"
+                          ? `${product.sku}-SERIAL-001`
+                          : null,
+                      imei:
+                        product.trackingType === "imei"
+                          ? "356938035643809"
+                          : null,
+                      condition: "new",
+                      received_at: new Date().toISOString(),
+                    },
+                  ],
           }))
-        : catalogToVariantOptions(catalogProducts);
+        : availablePartOptions.map((part) => ({
+            id: part.variant_id,
+            label: `${part.product_name} / ${part.variant_name}`,
+            sku: part.sku,
+            trackingType: part.tracking_type,
+            price: Number(part.selling_price),
+            availableQuantity: part.available_quantity,
+            serializedUnits: part.serialized_units,
+          }));
     const needle = partSearch.trim().toLowerCase();
     return variants.filter((variant) =>
       needle
@@ -260,7 +282,7 @@ export function RepairsPage() {
             .includes(needle)
         : true,
     );
-  }, [catalogProducts, isPreview, partSearch, token]);
+  }, [availablePartOptions, isPreview, partSearch, token]);
 
   const selectedPartVariant = useMemo(
     () => partVariantOptions.find((variant) => variant.id === partForm.variant_id),
@@ -269,11 +291,8 @@ export function RepairsPage() {
 
   const serializedPartOptions = useMemo(
     () =>
-      serializedUnits.filter(
-        (unit) =>
-          unit.variant_id === partForm.variant_id && unit.status === "available",
-      ),
-    [partForm.variant_id, serializedUnits],
+      selectedPartVariant?.serializedUnits ?? [],
+    [selectedPartVariant],
   );
 
   const selectedTicketParts = useMemo(
@@ -302,6 +321,10 @@ export function RepairsPage() {
     };
   }, [invoice, selectedTicket, selectedTicketParts]);
   const selectedTicketStageIndex = repairStageIndex(selectedTicket?.status);
+  const selectedStatusOptions = useMemo(
+    () => (selectedTicket ? allowedStatusOptions(selectedTicket) : []),
+    [selectedTicket],
+  );
   const selectedTicketPartsTotal = selectedTicketParts.reduce(
     (sum, part) => sum + Number(part.unit_price) * part.quantity,
     0,
@@ -370,12 +393,18 @@ export function RepairsPage() {
     ? "Select a ticket before logging parts."
     : !canLogParts(selectedTicket)
       ? "Parts unlock after customer quote approval."
-      : !selectedPartVariant
-        ? "Select a repair part from the catalog."
+    : !selectedPartVariant
+        ? "Select an available repair part from this branch."
+        : selectedPartVariant.availableQuantity <= 0
+          ? "This part is not available in this ticket's branch."
         : !Number.isInteger(partQuantity) || partQuantity <= 0
           ? "Part quantity must be a whole number of at least 1."
+          : partQuantity > selectedPartVariant.availableQuantity
+            ? `Only ${integer(selectedPartVariant.availableQuantity)} available in this branch.`
           : selectedPartNeedsUnit && partQuantity !== 1
             ? "Serialized or IMEI parts must be logged one unit at a time."
+            : selectedPartNeedsUnit && !serializedPartOptions.length
+              ? "No available serial/IMEI unit exists in this branch."
             : selectedPartNeedsUnit && !partForm.serialized_unit_id
               ? "Select the exact serialized/IMEI unit used."
               : null;
@@ -572,26 +601,22 @@ export function RepairsPage() {
   }, [isPreview, selectedBranchId, token]);
 
   useEffect(() => {
-    if (!token || isPreview || !selectedBranchId) return;
+    if (!token || isPreview) return;
+    if (!selectedTicket) {
+      setAvailablePartOptions([]);
+      return;
+    }
 
     let active = true;
     Promise.allSettled([
-      listCatalogProducts(token, partSearch),
-      listSerializedUnits(token, selectedBranchId, "", {
-        status: "available",
-        pageSize: 100,
-      }),
+      listRepairAvailableParts(token, selectedTicket.id, partSearch),
       currentTillSession(token),
-    ]).then(([catalogResult, serializedResult, tillResult]) => {
+    ]).then(([partsResult, tillResult]) => {
       if (!active) return;
 
-      if (catalogResult.status === "fulfilled") {
-        setCatalogProducts(catalogResult.value.items);
-      }
-
-      if (serializedResult.status === "fulfilled") {
-        setSerializedUnits(serializedResult.value.items);
-      }
+      setAvailablePartOptions(
+        partsResult.status === "fulfilled" ? partsResult.value.items : [],
+      );
 
       setTillSession(tillResult.status === "fulfilled" ? tillResult.value : null);
     });
@@ -599,7 +624,7 @@ export function RepairsPage() {
     return () => {
       active = false;
     };
-  }, [isPreview, partSearch, selectedBranchId, token]);
+  }, [isPreview, partSearch, selectedTicket?.id, token]);
 
   const statusCounts = useMemo(() => {
     const counts = new Map<string, number>();
@@ -612,7 +637,7 @@ export function RepairsPage() {
   useEffect(() => {
     if (!selectedTicket) return;
     setSelectedTechnicianId(selectedTicket.technician_id ?? "");
-    setNextStatus(recommendedNextStatus(selectedTicket.status));
+    setNextStatus(allowedStatusOptions(selectedTicket)[0] ?? selectedTicket.status);
     setDiagnosisForm({
       diagnosis: selectedTicket.diagnosis ?? "",
       labor_estimate:
@@ -666,8 +691,12 @@ export function RepairsPage() {
   ]);
 
   useEffect(() => {
-    if (!partVariantOptions.length) return;
     setPartForm((current) => {
+      if (!partVariantOptions.length) {
+        return current.variant_id
+          ? { ...current, variant_id: "", serialized_unit_id: "" }
+          : current;
+      }
       if (current.variant_id && partVariantOptions.some((item) => item.id === current.variant_id)) {
         return current;
       }
@@ -1028,6 +1057,15 @@ export function RepairsPage() {
     event.preventDefault();
     if (!selectedTicket) {
       setNotice("Select a repair ticket first.");
+      return;
+    }
+    const allowedStatuses = allowedStatusOptions(selectedTicket);
+    if (!allowedStatuses.includes(nextStatus)) {
+      setNotice(
+        selectedTicket.status === "repairing"
+          ? "Use the Mark Ready for Pickup button after repair testing is complete."
+          : "That status move is not available from the current repair stage.",
+      );
       return;
     }
 
@@ -2134,32 +2172,48 @@ export function RepairsPage() {
                   <form onSubmit={handleStatusUpdate} className="action-form">
                   <div className="repair-form-hint">
                     <span>Suggested next step</span>
-                    <strong>{titleize(recommendedNextStatus(selectedTicket.status))}</strong>
+                    <strong>
+                      {selectedStatusOptions.length
+                        ? titleize(selectedStatusOptions[0])
+                        : selectedTicket.status === "repairing"
+                          ? "Use Mark Ready for Pickup"
+                          : "No status update needed"}
+                    </strong>
                   </div>
-                  <label>
-                    Update status
-                    <select
-                      value={nextStatus}
-                      onChange={(event) => setNextStatus(event.target.value)}
-                    >
-                      {repairStatuses.map((status) => (
-                        <option key={status} value={status}>
-                          {titleize(status)}
-                        </option>
-                      ))}
-                    </select>
-                  </label>
-                  <label>
-                    Note
-                    <textarea
-                      value={statusNote}
-                      onChange={(event) => setStatusNote(event.target.value)}
-                      placeholder="Optional update note"
-                    />
-                  </label>
-                  <button className="secondary-button" disabled={busy}>
-                    Update Status
-                  </button>
+                  {selectedStatusOptions.length ? (
+                    <>
+                      <label>
+                        Update status
+                        <select
+                          value={nextStatus}
+                          onChange={(event) => setNextStatus(event.target.value)}
+                        >
+                          {selectedStatusOptions.map((status) => (
+                            <option key={status} value={status}>
+                              {titleize(status)}
+                            </option>
+                          ))}
+                        </select>
+                      </label>
+                      <label>
+                        Note
+                        <textarea
+                          value={statusNote}
+                          onChange={(event) => setStatusNote(event.target.value)}
+                          placeholder="Optional update note"
+                        />
+                      </label>
+                      <button className="secondary-button" disabled={busy}>
+                        Update Status
+                      </button>
+                    </>
+                  ) : (
+                    <p className="muted">
+                      {selectedTicket.status === "repairing"
+                        ? "When testing is complete, use the separate Mark Ready for Pickup action below."
+                        : "This ticket cannot be moved with the normal status updater right now."}
+                    </p>
+                  )}
                   </form>
                 )}
 
@@ -2194,10 +2248,16 @@ export function RepairsPage() {
                         {partVariantOptions.map((variant) => (
                           <option key={variant.id} value={variant.id}>
                             {variant.label} / {variant.sku} /{" "}
-                            {titleize(variant.trackingType)}
+                            {titleize(variant.trackingType)} / Available{" "}
+                            {integer(variant.availableQuantity)}
                           </option>
                         ))}
                       </select>
+                      {!partVariantOptions.length && (
+                        <small>
+                          No available branch parts match this search.
+                        </small>
+                      )}
                     </label>
                   </div>
                   <div className="form-grid form-grid--two">
@@ -2232,7 +2292,7 @@ export function RepairsPage() {
                           <option value="">Select available unit</option>
                           {serializedPartOptions.map((unit) => (
                             <option key={unit.id} value={unit.id}>
-                              {unit.serial_number ?? unit.imei ?? unit.sku}
+                              {unit.serial_number ?? unit.imei ?? unit.id}
                             </option>
                           ))}
                         </select>
@@ -2260,6 +2320,12 @@ export function RepairsPage() {
                           ? selectedPartVariant.label
                           : "No part selected"}
                       </strong>
+                      {selectedPartVariant && (
+                        <small>
+                          {integer(selectedPartVariant.availableQuantity)} available
+                          in this branch
+                        </small>
+                      )}
                     </div>
                     <div>
                       <span>Tracking</span>

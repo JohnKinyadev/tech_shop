@@ -661,6 +661,26 @@ export type RepairPart = ModelResponse & {
   unit_price: string;
 };
 
+export type RepairPartUnitOption = {
+  id: UUID;
+  serial_number: string | null;
+  imei: string | null;
+  condition: string;
+  received_at: string;
+};
+
+export type RepairPartOption = {
+  product_id: UUID;
+  product_name: string;
+  variant_id: UUID;
+  variant_name: string;
+  sku: string;
+  tracking_type: "bulk" | "serial" | "imei";
+  selling_price: string;
+  available_quantity: number;
+  serialized_units: RepairPartUnitOption[];
+};
+
 export type RepairStatusHistory = ModelResponse & {
   repair_ticket_id: UUID;
   from_status: string | null;

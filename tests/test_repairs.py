@@ -54,6 +54,7 @@ def test_repair_routes_are_exposed() -> None:
     assert "/api/v1/staff/repairs" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/intake" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/assignment" in paths
+    assert "/api/v1/staff/repairs/{ticket_id}/available-parts" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/diagnosis" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/parts" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/ready" in paths
@@ -173,6 +174,41 @@ def test_technician_can_list_assigned_repair_scope(monkeypatch) -> None:
     )
     assert response.status_code == 200
     assert response.json()["items"] == []
+
+
+def test_technician_can_list_available_parts_for_ticket(monkeypatch) -> None:
+    actor = principal(TECHNICIAN, {"repairs.update"})
+    ticket_id = uuid4()
+    use_principal(actor)
+
+    def fake_parts(db, principal, received_ticket_id, **kwargs):
+        assert principal == actor
+        assert received_ticket_id == ticket_id
+        assert kwargs["page"] == 1
+        return (
+            [
+                {
+                    "product_id": uuid4(),
+                    "product_name": "Galaxy A15 Screen",
+                    "variant_id": uuid4(),
+                    "variant_name": "Replacement LCD",
+                    "sku": "LCD-A15",
+                    "tracking_type": "bulk",
+                    "selling_price": "4500.00",
+                    "available_quantity": 3,
+                    "serialized_units": [],
+                }
+            ],
+            1,
+        )
+
+    monkeypatch.setattr(repair_service, "list_available_parts", fake_parts)
+    response = TestClient(app).get(
+        f"/api/v1/staff/repairs/{ticket_id}/available-parts",
+        params={"query": "screen"},
+    )
+    assert response.status_code == 200
+    assert response.json()["items"][0]["available_quantity"] == 3
 
 
 def test_technician_cannot_access_an_unassigned_ticket() -> None:
