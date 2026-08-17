@@ -723,7 +723,7 @@ export function RepairsPage() {
     return (
       Boolean(ticket.technician_id) &&
       (isPreview || ticket.technician_id === user?.id) &&
-      ["received", "diagnosing"].includes(ticket.status)
+      ["received", "diagnosing", "quote_pending"].includes(ticket.status)
     );
   }
 
@@ -1061,7 +1061,7 @@ export function RepairsPage() {
     }
     if (!canSubmitDiagnosis(selectedTicket)) {
       setNotice(
-        "Only the assigned technician can submit a quote while the ticket is received or diagnosing.",
+        "Only the assigned technician can submit or edit a quote before customer approval.",
       );
       return;
     }
@@ -1076,6 +1076,7 @@ export function RepairsPage() {
 
     setBusy(true);
     try {
+      const updatingQuote = selectedTicket.status === "quote_pending";
       if (!token || isPreview) {
         updateTicket({
           ...selectedTicket,
@@ -1085,7 +1086,11 @@ export function RepairsPage() {
           status: "quote_pending",
           updated_at: new Date().toISOString(),
         });
-        setNotice("Preview quote submitted to the cashier/front desk.");
+        setNotice(
+          updatingQuote
+            ? "Preview quote updated for the cashier/front desk."
+            : "Preview quote submitted to the cashier/front desk.",
+        );
         return;
       }
 
@@ -1095,7 +1100,11 @@ export function RepairsPage() {
         parts_estimate: diagnosisPartsAmount,
       });
       updateTicket(ticket);
-      setNotice(`${ticket.ticket_number} quote submitted to the cashier/front desk.`);
+      setNotice(
+        `${ticket.ticket_number} quote ${
+          updatingQuote ? "updated for" : "submitted to"
+        } the cashier/front desk.`,
+      );
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not submit the repair quote.");
     } finally {
@@ -1987,7 +1996,9 @@ export function RepairsPage() {
                   <div className="repair-form-hint">
                     <span>Technician diagnosis & quote</span>
                     <strong>
-                      {selectedTicket.diagnosis
+                      {selectedTicket.status === "quote_pending"
+                        ? "Quote waiting for customer approval"
+                        : selectedTicket.diagnosis
                         ? "Diagnosis captured"
                         : "Awaiting technician diagnosis"}
                     </strong>
@@ -2059,7 +2070,9 @@ export function RepairsPage() {
                       Boolean(diagnosisEstimateIssue)
                     }
                   >
-                    Submit Quote
+                    {selectedTicket.status === "quote_pending"
+                      ? "Update Quote"
+                      : "Submit Quote"}
                   </button>
                   </form>
                 )}
@@ -2073,6 +2086,20 @@ export function RepairsPage() {
                         ? "Call customer now"
                         : titleize(selectedTicket.status)}
                     </strong>
+                  </div>
+                  <div className="repair-quote-preview">
+                    <div>
+                      <span>Technician quote</span>
+                      <strong>{money(ticketEstimate(selectedTicket))}</strong>
+                    </div>
+                    <small>
+                      Labor {money(Number(selectedTicket.labor_estimate) || 0)} · Parts{" "}
+                      {money(Number(selectedTicket.parts_estimate) || 0)}
+                    </small>
+                    <small>
+                      {selectedTicket.diagnosis ||
+                        "No technician diagnosis has been submitted yet."}
+                    </small>
                   </div>
                   <label>
                     Customer decision note

@@ -216,6 +216,47 @@ def test_technician_cannot_record_customer_quote_decision() -> None:
         )
 
 
+def test_assigned_technician_can_edit_pending_quote(monkeypatch) -> None:
+    actor = principal(TECHNICIAN, {"repairs.update"})
+    ticket_id = uuid4()
+    ticket = SimpleNamespace(
+        id=ticket_id,
+        branch_id=actor.branch_id,
+        technician_id=actor.user_id,
+        status=RepairStatus.QUOTE_PENDING,
+        diagnosis="Old diagnosis",
+        labor_estimate="1000.00",
+        parts_estimate="2000.00",
+    )
+    history = []
+
+    def fake_get_ticket_model(db, principal, received_ticket_id, **kwargs):
+        assert principal == actor
+        assert received_ticket_id == ticket_id
+        return ticket
+
+    monkeypatch.setattr(repair_service, "get_ticket_model", fake_get_ticket_model)
+    monkeypatch.setattr(repair_service, "_ticket_response", lambda db, item: item)
+
+    result = repair_service.submit_diagnosis(
+        SimpleNamespace(add=history.append, flush=lambda: None),
+        actor,
+        ticket_id,
+        RepairDiagnosisUpdate(
+            diagnosis="Updated screen and charging port quote",
+            labor_estimate="1800.00",
+            parts_estimate="4200.00",
+        ),
+    )
+
+    assert result is ticket
+    assert ticket.status == RepairStatus.QUOTE_PENDING
+    assert ticket.diagnosis == "Updated screen and charging port quote"
+    assert str(ticket.labor_estimate) == "1800.00"
+    assert str(ticket.parts_estimate) == "4200.00"
+    assert history[-1].note == "Technician updated diagnosis and quote"
+
+
 def test_cashier_quote_decision_uses_front_desk_permission(monkeypatch) -> None:
     actor = principal(CASHIER, {"repairs.quote.approve"})
     ticket_id = uuid4()

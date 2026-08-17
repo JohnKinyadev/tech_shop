@@ -127,8 +127,9 @@ opening float, cash sales, and cash refunds.
 Repair management is available under `/api/v1/staff/repairs`. Cashiers/front desk staff
 create bookings, record device intake, assign technicians from the same branch, and record
 the customer quote decision after communicating with the customer. Technicians can only
-access assigned tickets; they submit diagnosis and quote estimates, move repairs through
-the controlled status pipeline after approval, and log parts at server-controlled prices.
+access assigned tickets; they submit diagnosis and quote estimates, edit pending quotes
+before customer approval, move repairs through the controlled status pipeline after
+approval, and log parts at server-controlled prices.
 Logged parts are deducted through the central inventory ledger and can be restored before a
 repair is closed if an entry was made in error.
 

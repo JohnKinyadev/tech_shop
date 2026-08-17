@@ -260,7 +260,7 @@ Routers should not contain business logic. If a rule matters, put it in a servic
 | Admin | All branches | Everything |
 | Branch Manager | Own branch | Branch operations, approvals, staff below manager |
 | Inventory Manager | Own branch | Catalog view, inventory, purchasing, fulfillment |
-| Technician | Assigned repair tickets | Repair view/update, diagnosis and quote submission, mark ready, own repair reports |
+| Technician | Assigned repair tickets | Repair view/update, diagnosis and quote submission/editing before approval, mark ready, own repair reports |
 | Cashier | Own branch / own till | POS, repair intake/assignment, customer quote approval, warranty lookup, own till |
 | Accountant | Own branch reports | Read-only sales/inventory/repair reports and expenses |
 
@@ -416,7 +416,7 @@ matching `backend/schemas/*_schemas.py` file or in Swagger.
 | GET | `/repairs/{ticket_id}` | `ticket_id` path | - | Gets repair ticket |
 | POST | `/repairs/{ticket_id}/intake` | `ticket_id` path | `RepairIntakeUpdate` | Records device intake |
 | PATCH | `/repairs/{ticket_id}/assignment` | `ticket_id` path | `RepairAssignmentUpdate` | Assigns technician |
-| POST | `/repairs/{ticket_id}/diagnosis` | `ticket_id` path | `RepairDiagnosisUpdate` | Assigned technician submits diagnosis/quote |
+| POST | `/repairs/{ticket_id}/diagnosis` | `ticket_id` path | `RepairDiagnosisUpdate` | Assigned technician submits or edits diagnosis/quote before customer approval |
 | POST | `/repairs/{ticket_id}/quote-decision` | `ticket_id` path | `RepairQuoteDecision` | Cashier records customer approval/decline |
 | POST | `/repairs/{ticket_id}/status` | `ticket_id` path | `RepairStatusUpdate` | Moves through allowed repair statuses |
 | POST | `/repairs/{ticket_id}/parts` | `ticket_id` path | `RepairPartCreate` | Logs part usage and deducts stock |

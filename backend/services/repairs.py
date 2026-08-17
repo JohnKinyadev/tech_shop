@@ -381,8 +381,13 @@ def submit_diagnosis(
     )
     if ticket.technician_id is None:
         raise ConflictError("repair must be assigned before diagnosis")
-    if ticket.status not in {RepairStatus.RECEIVED, RepairStatus.DIAGNOSING}:
-        raise ConflictError("repair is not ready for diagnosis")
+    if ticket.status not in {
+        RepairStatus.RECEIVED,
+        RepairStatus.DIAGNOSING,
+        RepairStatus.QUOTE_PENDING,
+    }:
+        raise ConflictError("repair quote can only be submitted before customer approval")
+    is_quote_update = ticket.status == RepairStatus.QUOTE_PENDING
     ticket.diagnosis = payload.diagnosis.strip()
     ticket.labor_estimate = payload.labor_estimate
     ticket.parts_estimate = payload.parts_estimate
@@ -391,7 +396,9 @@ def submit_diagnosis(
         ticket,
         principal,
         RepairStatus.QUOTE_PENDING,
-        "Technician submitted diagnosis and quote",
+        "Technician updated diagnosis and quote"
+        if is_quote_update
+        else "Technician submitted diagnosis and quote",
     )
     db.flush()
     return _ticket_response(db, ticket)
