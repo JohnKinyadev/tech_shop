@@ -951,7 +951,7 @@ def _repair_workflow(
     )
     repairs.decide_quote(
         db,
-        technician,
+        cashier,
         ticket.id,
         RepairQuoteDecision(approved=True, note="Demo customer approved quote"),
     )

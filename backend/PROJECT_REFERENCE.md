@@ -251,6 +251,7 @@ Routers should not contain business logic. If a rule matters, put it in a servic
 | `backend/migrations/versions/0980f07fde03_link_pos_refunds_to_till_sessions.py` | Links POS refunds to till sessions |
 | `backend/migrations/versions/9c276b0ab9f0_add_stock_count_tables.py` | Adds stock count tables |
 | `backend/migrations/versions/dfa7c89665b8_create_stocktake_tables.py` | Current no-op checkpoint retained for DB revision continuity |
+| `backend/migrations/versions/bc9d1f8e2a44_add_payment_payer_details.py` | Adds payer details to payment records |
 
 ## Role and permission model
 
@@ -259,8 +260,8 @@ Routers should not contain business logic. If a rule matters, put it in a servic
 | Admin | All branches | Everything |
 | Branch Manager | Own branch | Branch operations, approvals, staff below manager |
 | Inventory Manager | Own branch | Catalog view, inventory, purchasing, fulfillment |
-| Technician | Assigned repair tickets | Repair view/update/close, own repair reports |
-| Cashier | Own branch / own till | POS, warranty lookup, own till |
+| Technician | Assigned repair tickets | Repair view/update, diagnosis and quote submission, mark ready, own repair reports |
+| Cashier | Own branch / own till | POS, repair intake/assignment, customer quote approval, warranty lookup, own till |
 | Accountant | Own branch reports | Read-only sales/inventory/repair reports and expenses |
 
 Important rules:
@@ -415,8 +416,8 @@ matching `backend/schemas/*_schemas.py` file or in Swagger.
 | GET | `/repairs/{ticket_id}` | `ticket_id` path | - | Gets repair ticket |
 | POST | `/repairs/{ticket_id}/intake` | `ticket_id` path | `RepairIntakeUpdate` | Records device intake |
 | PATCH | `/repairs/{ticket_id}/assignment` | `ticket_id` path | `RepairAssignmentUpdate` | Assigns technician |
-| POST | `/repairs/{ticket_id}/diagnosis` | `ticket_id` path | `RepairDiagnosisUpdate` | Submits diagnosis/quote |
-| POST | `/repairs/{ticket_id}/quote-decision` | `ticket_id` path | `RepairQuoteDecision` | Records customer approval/decline |
+| POST | `/repairs/{ticket_id}/diagnosis` | `ticket_id` path | `RepairDiagnosisUpdate` | Assigned technician submits diagnosis/quote |
+| POST | `/repairs/{ticket_id}/quote-decision` | `ticket_id` path | `RepairQuoteDecision` | Cashier records customer approval/decline |
 | POST | `/repairs/{ticket_id}/status` | `ticket_id` path | `RepairStatusUpdate` | Moves through allowed repair statuses |
 | POST | `/repairs/{ticket_id}/parts` | `ticket_id` path | `RepairPartCreate` | Logs part usage and deducts stock |
 | DELETE | `/repairs/{ticket_id}/parts/{part_id}` | `ticket_id`, `part_id` path | - | Removes part before close and restores stock |

@@ -96,8 +96,15 @@ def _ticket_response(db: Session, ticket: RepairTicket) -> RepairTicketView:
 
 def _enforce_ticket_scope(principal: AuthPrincipal, ticket: RepairTicket) -> None:
     enforce_branch_scope(principal, ticket.branch_id)
-    if principal.role_code == TECHNICIAN and ticket.technician_id != principal.user_id:
+    if _is_technician_principal(principal) and ticket.technician_id != principal.user_id:
         raise AuthorizationError("technicians can only access assigned repair tickets")
+
+
+def _is_technician_principal(principal: AuthPrincipal) -> bool:
+    return (
+        principal.role_code == TECHNICIAN
+        or "technician" in principal.role_name.lower()
+    )
 
 
 def _enforce_any_permission(
@@ -367,6 +374,8 @@ def submit_diagnosis(
     ticket_id: UUID,
     payload: RepairDiagnosisUpdate,
 ) -> RepairTicketView:
+    if not _is_technician_principal(principal):
+        raise AuthorizationError("only the assigned technician can submit a repair quote")
     ticket = get_ticket_model(
         db, principal, ticket_id, permission="repairs.update", lock=True
     )
@@ -377,7 +386,13 @@ def submit_diagnosis(
     ticket.diagnosis = payload.diagnosis.strip()
     ticket.labor_estimate = payload.labor_estimate
     ticket.parts_estimate = payload.parts_estimate
-    _history(db, ticket, principal, RepairStatus.QUOTE_PENDING, "Diagnosis submitted")
+    _history(
+        db,
+        ticket,
+        principal,
+        RepairStatus.QUOTE_PENDING,
+        "Technician submitted diagnosis and quote",
+    )
     db.flush()
     return _ticket_response(db, ticket)
 
@@ -388,11 +403,13 @@ def decide_quote(
     ticket_id: UUID,
     payload: RepairQuoteDecision,
 ) -> RepairTicketView:
+    if _is_technician_principal(principal):
+        raise AuthorizationError("technicians cannot approve customer quote decisions")
     ticket = get_ticket_model(
         db,
         principal,
         ticket_id,
-        any_permission=("repairs.update", "sales.process"),
+        any_permission=("repairs.quote.approve", "sales.process"),
         lock=True,
     )
     if ticket.status != RepairStatus.QUOTE_PENDING:

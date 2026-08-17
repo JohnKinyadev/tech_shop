@@ -48,7 +48,8 @@ PERMISSIONS = (
     permission("repairs.view", "View repair tickets within the permitted scope"),
     permission("repairs.assign", "Assign repair tickets to technicians"),
     permission("repairs.update", "Update repair status and parts usage"),
-    permission("repairs.close", "Close repair tickets and generate invoices"),
+    permission("repairs.quote.approve", "Approve or decline customer repair quotes"),
+    permission("repairs.close", "Mark completed repair tickets ready for pickup"),
     permission("orders.fulfill", "Fulfill or cancel online orders"),
     permission("reports.sales.view", "View sales reports"),
     permission("reports.inventory.view", "View inventory and purchasing reports"),
@@ -78,6 +79,7 @@ BRANCH_MANAGER_PERMISSIONS = frozenset(
         "repairs.view",
         "repairs.assign",
         "repairs.update",
+        "repairs.quote.approve",
         "repairs.close",
         "orders.fulfill",
         "reports.sales.view",
@@ -133,13 +135,16 @@ ROLE_DEFINITIONS = (
     RoleDefinition(
         CASHIER,
         "Cashier",
-        "Point of sale and own till access",
+        "Point of sale, repair reception, and own till access",
         frozenset(
             {
                 "catalog.view",
                 "inventory.view",
                 "sales.process",
                 "tills.own.view",
+                "repairs.view",
+                "repairs.assign",
+                "repairs.quote.approve",
             }
         ),
     ),

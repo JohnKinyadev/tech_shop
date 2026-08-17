@@ -720,7 +720,11 @@ export function RepairsPage() {
   }
 
   function canSubmitDiagnosis(ticket: RepairTicket) {
-    return Boolean(ticket.technician_id) && ["received", "diagnosing"].includes(ticket.status);
+    return (
+      Boolean(ticket.technician_id) &&
+      (isPreview || ticket.technician_id === user?.id) &&
+      ["received", "diagnosing"].includes(ticket.status)
+    );
   }
 
   function canCollectSelectedTicket() {
@@ -767,8 +771,8 @@ export function RepairsPage() {
   function ticketNextAction(ticket: RepairTicket) {
     if (!ticket.technician_id) return "Assign a technician before work starts.";
     if (ticket.status === "received") return "Move to diagnosis after intake checks.";
-    if (ticket.status === "diagnosing") return "Record diagnosis and prepare quote.";
-    if (ticket.status === "quote_pending") return "Call customer for approval.";
+    if (ticket.status === "diagnosing") return "Technician should submit diagnosis and quote.";
+    if (ticket.status === "quote_pending") return "Cashier should call customer for quote approval.";
     if (ticket.status === "customer_approved") return "Confirm parts availability.";
     if (ticket.status === "awaiting_parts") return "Reserve or purchase required parts.";
     if (ticket.status === "repairing") return "Complete repair, test device, then mark ready.";
@@ -1056,7 +1060,9 @@ export function RepairsPage() {
       return;
     }
     if (!canSubmitDiagnosis(selectedTicket)) {
-      setNotice("Assign the ticket and keep it in received/diagnosing before diagnosis.");
+      setNotice(
+        "Only the assigned technician can submit a quote while the ticket is received or diagnosing.",
+      );
       return;
     }
     if (!diagnosisForm.diagnosis.trim()) {
@@ -1079,7 +1085,7 @@ export function RepairsPage() {
           status: "quote_pending",
           updated_at: new Date().toISOString(),
         });
-        setNotice("Preview diagnosis submitted and quote prepared.");
+        setNotice("Preview quote submitted to the cashier/front desk.");
         return;
       }
 
@@ -1089,9 +1095,9 @@ export function RepairsPage() {
         parts_estimate: diagnosisPartsAmount,
       });
       updateTicket(ticket);
-      setNotice(`Diagnosis submitted for ${ticket.ticket_number}.`);
+      setNotice(`${ticket.ticket_number} quote submitted to the cashier/front desk.`);
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not submit diagnosis.");
+      setNotice(error instanceof Error ? error.message : "Could not submit the repair quote.");
     } finally {
       setBusy(false);
     }
@@ -1103,7 +1109,7 @@ export function RepairsPage() {
       return;
     }
     if (selectedTicket.status !== "quote_pending") {
-      setNotice("Quote approval is only available while the ticket is quote pending.");
+      setNotice("Customer approval is only available after the technician submits a quote.");
       return;
     }
 
@@ -1117,7 +1123,11 @@ export function RepairsPage() {
           updated_at: new Date().toISOString(),
         });
         setQuoteNote("");
-        setNotice(approved ? "Preview quote approved." : "Preview quote declined.");
+        setNotice(
+          approved
+            ? "Preview customer approval recorded."
+            : "Preview customer decline recorded.",
+        );
         return;
       }
 
@@ -1129,11 +1139,11 @@ export function RepairsPage() {
       setQuoteNote("");
       setNotice(
         approved
-          ? `${ticket.ticket_number} quote approved.`
-          : `${ticket.ticket_number} quote declined and cancelled.`,
+          ? `${ticket.ticket_number} customer approval recorded.`
+          : `${ticket.ticket_number} customer declined and ticket was cancelled.`,
       );
     } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not update quote decision.");
+      setNotice(error instanceof Error ? error.message : "Could not record customer decision.");
     } finally {
       setBusy(false);
     }
@@ -1975,7 +1985,7 @@ export function RepairsPage() {
                 {showTechnicianRepairWorkbench && (
                   <form onSubmit={handleSubmitDiagnosis} className="action-form">
                   <div className="repair-form-hint">
-                    <span>Diagnosis & quote</span>
+                    <span>Technician diagnosis & quote</span>
                     <strong>
                       {selectedTicket.diagnosis
                         ? "Diagnosis captured"
@@ -1992,7 +2002,7 @@ export function RepairsPage() {
                           diagnosis: event.target.value,
                         }))
                       }
-                      placeholder="Fault found, recommended fix, customer-facing quote notes"
+                      placeholder="Fault found, recommended fix, parts needed, labor estimate"
                     />
                   </label>
                   <div className="form-grid form-grid--two">
@@ -2027,7 +2037,7 @@ export function RepairsPage() {
                   </div>
                   <div className="repair-quote-preview">
                     <div>
-                      <span>Quote preview</span>
+                      <span>Quote to front desk</span>
                       <strong>{money(diagnosisQuoteTotal)}</strong>
                     </div>
                     <small>
@@ -2049,7 +2059,7 @@ export function RepairsPage() {
                       Boolean(diagnosisEstimateIssue)
                     }
                   >
-                    Submit Diagnosis
+                    Submit Quote
                   </button>
                   </form>
                 )}
@@ -2057,15 +2067,15 @@ export function RepairsPage() {
                 {showCashierRepairHandoff && (
                   <div className="action-form">
                   <div className="repair-form-hint">
-                    <span>Customer quote decision</span>
+                    <span>Cashier customer approval</span>
                     <strong>
                       {selectedTicket.status === "quote_pending"
-                        ? "Waiting for customer"
+                        ? "Call customer now"
                         : titleize(selectedTicket.status)}
                     </strong>
                   </div>
                   <label>
-                    Quote note
+                    Customer decision note
                     <textarea
                       value={quoteNote}
                       onChange={(event) => setQuoteNote(event.target.value)}
@@ -2079,7 +2089,7 @@ export function RepairsPage() {
                       onClick={() => void handleQuoteDecision(true)}
                       type="button"
                     >
-                      Approve Quote
+                      Customer Approved
                     </button>
                     <button
                       className="ghost-button"
@@ -2087,7 +2097,7 @@ export function RepairsPage() {
                       onClick={() => void handleQuoteDecision(false)}
                       type="button"
                     >
-                      Decline
+                      Customer Declined
                     </button>
                   </div>
                   </div>

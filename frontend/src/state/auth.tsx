@@ -34,7 +34,15 @@ const previewUser: CurrentUser = {
   branch_id: "preview-branch",
   role_code: "cashier",
   role_name: "Cashier",
-  permissions: ["catalog.view", "inventory.view", "sales.process", "tills.own.view"],
+  permissions: [
+    "catalog.view",
+    "inventory.view",
+    "sales.process",
+    "tills.own.view",
+    "repairs.view",
+    "repairs.assign",
+    "repairs.quote.approve",
+  ],
   must_change_password: false,
 };
 

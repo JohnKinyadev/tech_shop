@@ -10,7 +10,12 @@ from backend.core.permissions import CASHIER, INVENTORY_MANAGER, TECHNICIAN
 from backend.main import app
 from backend.models.database import get_db
 from backend.models.enums import RepairStatus
-from backend.schemas.repair_schemas import RepairPartCreate, RepairPartView
+from backend.schemas.repair_schemas import (
+    RepairDiagnosisUpdate,
+    RepairPartCreate,
+    RepairPartView,
+    RepairQuoteDecision,
+)
 from backend.services import repair_billing
 from backend.services import repairs as repair_service
 from backend.services.auth import AuthPrincipal
@@ -180,6 +185,69 @@ def test_technician_cannot_access_an_unassigned_ticket() -> None:
 def test_repair_part_input_does_not_accept_pricing_authority() -> None:
     assert "unit_price" not in RepairPartCreate.model_fields
     assert "unit_cost" not in RepairPartView.model_fields
+
+
+def test_only_assigned_technician_role_can_submit_repair_quote() -> None:
+    actor = principal(CASHIER, {"repairs.update"})
+    with pytest.raises(AuthorizationError, match="assigned technician"):
+        repair_service.submit_diagnosis(
+            SimpleNamespace(),
+            actor,
+            uuid4(),
+            RepairDiagnosisUpdate(
+                diagnosis="Needs new screen",
+                labor_estimate="1200.00",
+                parts_estimate="3500.00",
+            ),
+        )
+
+
+def test_technician_cannot_record_customer_quote_decision() -> None:
+    actor = principal(
+        TECHNICIAN,
+        {"repairs.view", "repairs.update", "repairs.quote.approve", "sales.process"},
+    )
+    with pytest.raises(AuthorizationError, match="technicians cannot approve"):
+        repair_service.decide_quote(
+            SimpleNamespace(),
+            actor,
+            uuid4(),
+            RepairQuoteDecision(approved=True, note="Customer approved"),
+        )
+
+
+def test_cashier_quote_decision_uses_front_desk_permission(monkeypatch) -> None:
+    actor = principal(CASHIER, {"repairs.quote.approve"})
+    ticket_id = uuid4()
+    ticket = SimpleNamespace(
+        id=ticket_id,
+        branch_id=actor.branch_id,
+        technician_id=uuid4(),
+        status=RepairStatus.QUOTE_PENDING,
+        approved_at=None,
+    )
+    calls = {}
+
+    def fake_get_ticket_model(db, principal, received_ticket_id, **kwargs):
+        calls["any_permission"] = kwargs.get("any_permission")
+        assert principal == actor
+        assert received_ticket_id == ticket_id
+        return ticket
+
+    monkeypatch.setattr(repair_service, "get_ticket_model", fake_get_ticket_model)
+    monkeypatch.setattr(repair_service, "_ticket_response", lambda db, item: item)
+
+    result = repair_service.decide_quote(
+        SimpleNamespace(add=lambda item: None, flush=lambda: None),
+        actor,
+        ticket_id,
+        RepairQuoteDecision(approved=True, note="Customer approved by phone"),
+    )
+
+    assert result is ticket
+    assert ticket.status == RepairStatus.CUSTOMER_APPROVED
+    assert ticket.approved_at is not None
+    assert calls["any_permission"] == ("repairs.quote.approve", "sales.process")
 
 
 def test_repair_status_transitions_are_explicit() -> None:
