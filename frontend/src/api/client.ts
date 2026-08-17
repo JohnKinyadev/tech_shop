@@ -53,6 +53,7 @@ import type {
   RepairBookingPayload,
   RepairIntakePayload,
   RepairInvoice,
+  RepairMpesaStkPushPayload,
   RepairNotePayload,
   RepairPartOption,
   RepairPartPayload,
@@ -963,6 +964,30 @@ export function addRepairPayment(
   body: RepairPaymentPayload,
 ) {
   return apiRequest<Payment>(`/repairs/${ticketId}/payments`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function sendRepairMpesaStkPush(
+  token: string,
+  ticketId: string,
+  body: RepairMpesaStkPushPayload,
+) {
+  return apiRequest<MpesaStkPushResponse>(`/repairs/${ticketId}/mpesa/stk-push`, {
+    token,
+    method: "POST",
+    body,
+  });
+}
+
+export function manuallyConfirmRepairMpesaPayment(
+  token: string,
+  ticketId: string,
+  body: MpesaManualConfirmPayload,
+) {
+  return apiRequest<Payment>(`/repairs/${ticketId}/mpesa/manual-confirm`, {
     token,
     method: "POST",
     body,

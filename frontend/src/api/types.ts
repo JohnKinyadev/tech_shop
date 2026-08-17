@@ -286,6 +286,10 @@ export type MpesaStkPushPayload = {
   notes?: string | null;
 };
 
+export type RepairMpesaStkPushPayload = MpesaStkPushPayload & {
+  till_session_id: UUID;
+};
+
 export type MpesaManualConfirmPayload = {
   provider_reference: string;
   notes?: string | null;
@@ -963,6 +967,7 @@ export type RepairInvoice = {
   customer_name: string;
   customer_phone: string;
   device_description: string;
+  service_description: string;
   labor_amount: string;
   parts_amount: string;
   total_amount: string;

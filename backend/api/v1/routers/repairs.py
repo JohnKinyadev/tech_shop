@@ -10,7 +10,12 @@ from backend.api.dependencies import (
 )
 from backend.models.enums import RepairStatus
 from backend.schemas.base_schemas import Page
-from backend.schemas.payments_schemas import PaymentResponse
+from backend.schemas.payments_schemas import (
+    MpesaManualConfirmCreate,
+    MpesaRepairStkPushCreate,
+    MpesaStkPushResponse,
+    PaymentResponse,
+)
 from backend.schemas.repair_schemas import (
     RepairAssignmentUpdate,
     RepairBookingCreate,
@@ -27,6 +32,7 @@ from backend.schemas.repair_schemas import (
     RepairTicketView,
 )
 from backend.schemas.user_schemas import UserResponse
+from backend.services import mpesa as mpesa_service
 from backend.services import repair_billing
 from backend.services import repairs as repair_service
 from backend.services.auth import AuthPrincipal
@@ -266,6 +272,32 @@ def add_repair_payment(
     db: DatabaseSession,
 ) -> PaymentResponse:
     item = repair_billing.add_payment(db, principal, ticket_id, payload)
+    db.commit()
+    return item
+
+
+@router.post("/{ticket_id}/mpesa/stk-push", response_model=MpesaStkPushResponse)
+def send_repair_mpesa_stk_push(
+    ticket_id: UUID,
+    payload: MpesaRepairStkPushCreate,
+    principal: CurrentPrincipal,
+    db: DatabaseSession,
+) -> MpesaStkPushResponse:
+    item = mpesa_service.initiate_repair_stk_push(db, principal, ticket_id, payload)
+    db.commit()
+    return item
+
+
+@router.post("/{ticket_id}/mpesa/manual-confirm", response_model=PaymentResponse)
+def manually_confirm_repair_mpesa_payment(
+    ticket_id: UUID,
+    payload: MpesaManualConfirmCreate,
+    principal: CurrentPrincipal,
+    db: DatabaseSession,
+) -> PaymentResponse:
+    item = mpesa_service.manually_confirm_repair_payment(
+        db, principal, ticket_id, payload
+    )
     db.commit()
     return item
 

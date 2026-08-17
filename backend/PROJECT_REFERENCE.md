@@ -426,6 +426,8 @@ matching `backend/schemas/*_schemas.py` file or in Swagger.
 | POST | `/repairs/{ticket_id}/cancel` | `ticket_id` path | `RepairNote` | Cancels eligible repair |
 | GET | `/repairs/{ticket_id}/invoice` | `ticket_id` path | - | Calculates repair invoice |
 | POST | `/repairs/{ticket_id}/payments` | `ticket_id` path | `RepairPaymentCreate` | Records repair payment through till |
+| POST | `/repairs/{ticket_id}/mpesa/stk-push` | `ticket_id` path | `MpesaRepairStkPushCreate` | Sends repair payment M-Pesa STK Push through cashier till |
+| POST | `/repairs/{ticket_id}/mpesa/manual-confirm` | `ticket_id` path | `MpesaManualConfirmCreate` | Confirms delayed repair M-Pesa callback with customer receipt code |
 | POST | `/repairs/{ticket_id}/collect` | `ticket_id` path | - | Marks fully paid ready repair collected |
 
 ### Expenses

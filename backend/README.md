@@ -137,9 +137,12 @@ repair is closed if an entry was made in error.
 
 Repair invoices are calculated from approved labor and actual parts usage rather than
 stored as duplicated totals. Checkout staff can receive repair payments through their own
-open till without gaining access to diagnosis or inventory cost. Fully paid, ready repairs
-can be marked collected. Moving a ticket to ready-for-pickup writes an auditable
-notification-pending event for the later SMS integration.
+open till without gaining access to diagnosis or inventory cost. They can record cash,
+card, or M-Pesa receipt payments, or send a repair-specific M-Pesa STK prompt and confirm
+delayed callbacks from the customer's receipt code. The repair receipt includes the
+service performed, totals, payment history, and a customer thank-you note. Fully paid,
+ready repairs can be marked collected. Moving a ticket to ready-for-pickup writes an
+auditable notification-pending event for the later SMS integration.
 
 Expense management is available under `/api/v1/staff/expenses`. Admins and Branch Managers
 can maintain shared expense categories, create branch-scoped expense records, edit pending

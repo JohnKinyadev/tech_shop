@@ -100,6 +100,10 @@ class MpesaStkPushCreate(BaseSchema):
     notes: str | None = Field(default=None, max_length=500)
 
 
+class MpesaRepairStkPushCreate(MpesaStkPushCreate):
+    till_session_id: UUID
+
+
 class MpesaStkPushResponse(BaseSchema):
     payment: PaymentResponse
     merchant_request_id: str

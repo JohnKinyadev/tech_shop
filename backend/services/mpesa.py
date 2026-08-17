@@ -16,14 +16,17 @@ from backend.models.enums import (
     SaleStatus,
 )
 from backend.models.payments import Payment
-from backend.models.sales import Sale
+from backend.models.repairs import RepairTicket
+from backend.models.sales import Sale, TillSession
 from backend.schemas.payments_schemas import (
     MpesaManualConfirmCreate,
+    MpesaRepairStkPushCreate,
     MpesaStkPushCreate,
     MpesaStkQueryResponse,
     MpesaStkPushResponse,
     PaymentResponse,
 )
+from backend.services import repair_billing
 from backend.services import sales
 from backend.services.audit import record_audit
 from backend.services.auth import AuthPrincipal
@@ -254,6 +257,152 @@ def initiate_sale_stk_push(
     )
 
 
+def initiate_repair_stk_push(
+    db: Session,
+    principal: AuthPrincipal,
+    ticket_id: UUID,
+    payload: MpesaRepairStkPushCreate,
+) -> MpesaStkPushResponse:
+    ticket, session, due = repair_billing.payment_context(
+        db, principal, ticket_id, payload.till_session_id, lock=True
+    )
+    existing = db.scalar(
+        select(Payment).where(Payment.idempotency_key == payload.idempotency_key)
+    )
+    if existing is not None:
+        if existing.repair_ticket_id != ticket.id:
+            raise ConflictError("payment idempotency key is already in use")
+        provider_payload = existing.provider_payload or {}
+        return MpesaStkPushResponse(
+            payment=PaymentResponse.model_validate(existing),
+            merchant_request_id=str(provider_payload.get("merchant_request_id", "")),
+            checkout_request_id=str(
+                provider_payload.get("checkout_request_id")
+                or existing.provider_reference
+                or ""
+            ),
+            customer_message=str(
+                provider_payload.get("customer_message")
+                or "M-Pesa prompt already sent."
+            ),
+        )
+
+    pending_mpesa = db.scalar(
+        select(Payment.id).where(
+            Payment.repair_ticket_id == ticket.id,
+            Payment.method == PaymentMethod.MPESA,
+            Payment.status == PaymentStatus.PENDING,
+            Payment.is_deleted.is_(False),
+        )
+    )
+    if pending_mpesa is not None:
+        raise ConflictError(
+            "a M-Pesa prompt is already pending for this repair; check its "
+            "status or mark it cancelled before retrying"
+        )
+
+    amount = sales.money(payload.amount)
+    if amount > due:
+        raise ValidationError("payment exceeds the repair balance")
+
+    phone_number = _normalize_phone(payload.phone_number)
+    account_reference = _account_reference(ticket.ticket_number)
+    shortcode = settings.mpesa_shortcode.strip()
+    passkey = _configured_value(settings.mpesa_passkey, "passkey")
+    timestamp = _timestamp()
+    request_payload = {
+        "BusinessShortCode": shortcode,
+        "Password": _password(shortcode, passkey, timestamp),
+        "Timestamp": timestamp,
+        "TransactionType": settings.mpesa_transaction_type,
+        "Amount": _mpesa_amount(amount),
+        "PartyA": phone_number,
+        "PartyB": shortcode,
+        "PhoneNumber": phone_number,
+        "CallBackURL": settings.mpesa_stk_callback_url,
+        "AccountReference": account_reference,
+        "TransactionDesc": payload.notes or f"Repair payment for {ticket.ticket_number}",
+    }
+
+    try:
+        response = httpx.post(
+            f"{settings.mpesa_base_url}/mpesa/stkpush/v1/processrequest",
+            headers={"Authorization": f"Bearer {_access_token()}"},
+            json=request_payload,
+            timeout=30,
+        )
+        response.raise_for_status()
+    except httpx.HTTPError as exc:
+        raise ValidationError("could not send M-Pesa STK Push prompt") from exc
+
+    response_payload = response.json()
+    response_code = str(response_payload.get("ResponseCode", ""))
+    if response_code != "0":
+        message = (
+            response_payload.get("errorMessage")
+            or response_payload.get("ResponseDescription")
+            or "M-Pesa rejected the STK Push request"
+        )
+        raise ValidationError(str(message))
+
+    checkout_request_id = str(response_payload.get("CheckoutRequestID") or "")
+    merchant_request_id = str(response_payload.get("MerchantRequestID") or "")
+    customer_message = str(
+        response_payload.get("CustomerMessage")
+        or "M-Pesa prompt sent. Ask the customer to enter their PIN."
+    )
+    if not checkout_request_id:
+        raise ValidationError("M-Pesa response did not include a checkout request id")
+
+    payment = Payment(
+        branch_id=ticket.branch_id,
+        repair_ticket_id=ticket.id,
+        till_session_id=session.id,
+        direction=PaymentDirection.INCOMING,
+        method=PaymentMethod.MPESA,
+        status=PaymentStatus.PENDING,
+        amount=amount,
+        currency="KES",
+        provider_reference=checkout_request_id,
+        payer_phone=phone_number,
+        payer_name=None,
+        payer_account_reference=account_reference,
+        idempotency_key=payload.idempotency_key,
+        provider_payload={
+            "merchant_request_id": merchant_request_id,
+            "checkout_request_id": checkout_request_id,
+            "customer_message": customer_message,
+            "phone_number": phone_number,
+            "account_reference": account_reference,
+            "amount": str(amount),
+            "callback_url": settings.mpesa_stk_callback_url,
+            "response": response_payload,
+        },
+        notes=payload.notes,
+    )
+    db.add(payment)
+    db.flush()
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=ticket.branch_id,
+        action="mpesa.repair_stk_push_sent",
+        resource_type="payment",
+        resource_id=payment.id,
+        after={
+            "repair_ticket_id": str(ticket.id),
+            "checkout_request_id": checkout_request_id,
+            "amount": str(amount),
+        },
+    )
+    return MpesaStkPushResponse(
+        payment=PaymentResponse.model_validate(payment),
+        merchant_request_id=merchant_request_id,
+        checkout_request_id=checkout_request_id,
+        customer_message=customer_message,
+    )
+
+
 def _callback_metadata(callback: dict) -> dict[str, object]:
     items = callback.get("CallbackMetadata", {}).get("Item", [])
     return {
@@ -278,7 +427,6 @@ def _find_checkout_payment(db: Session, checkout_request_id: str) -> Payment | N
         select(Payment)
         .where(
             Payment.method == PaymentMethod.MPESA,
-            Payment.sale_id.is_not(None),
             or_(
                 Payment.provider_reference == checkout_request_id,
                 Payment.provider_payload["checkout_request_id"].as_string()
@@ -288,6 +436,61 @@ def _find_checkout_payment(db: Session, checkout_request_id: str) -> Payment | N
         )
         .with_for_update()
     )
+
+
+def manually_confirm_repair_payment(
+    db: Session,
+    principal: AuthPrincipal,
+    ticket_id: UUID,
+    payload: MpesaManualConfirmCreate,
+) -> PaymentResponse:
+    payment = db.scalar(
+        select(Payment)
+        .where(
+            Payment.repair_ticket_id == ticket_id,
+            Payment.method == PaymentMethod.MPESA,
+            Payment.status == PaymentStatus.PENDING,
+            Payment.is_deleted.is_(False),
+        )
+        .order_by(Payment.created_at.desc())
+        .with_for_update()
+    )
+    if payment is None:
+        raise NotFoundError("no pending M-Pesa payment found for this repair")
+    if payment.till_session_id is None:
+        raise ConflictError("repair M-Pesa payment is not linked to a till session")
+    repair_billing.payment_context(
+        db, principal, ticket_id, payment.till_session_id, lock=True
+    )
+
+    now = datetime.now(timezone.utc)
+    provider_payload = {
+        **(payment.provider_payload or {}),
+        "manual_confirmation": True,
+        "manual_confirmed_by": str(principal.user_id),
+        "manual_confirmed_at": now.isoformat(),
+        "manual_notes": payload.notes,
+    }
+    completed = repair_billing.complete_pending_payment(
+        db,
+        payment,
+        provider_reference=payload.provider_reference.strip().upper(),
+        provider_payload=provider_payload,
+        paid_at=now,
+    )
+    record_audit(
+        db,
+        actor_id=principal.user_id,
+        branch_id=payment.branch_id,
+        action="mpesa.repair_payment_manually_confirmed",
+        resource_type="payment",
+        resource_id=payment.id,
+        after={
+            "repair_ticket_id": str(ticket_id),
+            "provider_reference": completed.provider_reference,
+        },
+    )
+    return completed
 
 
 def manually_confirm_sale_payment(
@@ -360,9 +563,24 @@ def query_sale_stk_payment(
     )
     if payment is None:
         raise NotFoundError("payment not found")
-    if payment.sale_id is None:
-        raise ConflictError("payment is not linked to a sale")
-    sale = sales.get_sale_model(db, principal, payment.sale_id, lock=True)
+    sale: Sale | None = None
+    repair_ticket: RepairTicket | None = None
+    if payment.sale_id is not None:
+        sale = sales.get_sale_model(db, principal, payment.sale_id, lock=True)
+    elif payment.repair_ticket_id is not None:
+        repair_billing.invoice(db, principal, payment.repair_ticket_id)
+        repair_ticket = db.scalar(
+            select(RepairTicket)
+            .where(
+                RepairTicket.id == payment.repair_ticket_id,
+                RepairTicket.is_deleted.is_(False),
+            )
+            .with_for_update()
+        )
+        if repair_ticket is None:
+            raise NotFoundError("repair ticket not found")
+    else:
+        raise ConflictError("payment is not linked to a sale or repair")
     if payment.method != PaymentMethod.MPESA:
         raise ConflictError("only M-Pesa payments can be queried")
 
@@ -425,13 +643,22 @@ def query_sale_stk_payment(
     }
 
     if result_code == 0:
-        completed = sales.complete_pending_payment(
-            db,
-            payment,
-            provider_reference=payment.provider_reference,
-            provider_payload=provider_payload,
-            paid_at=datetime.now(timezone.utc),
-        )
+        if sale is not None:
+            completed = sales.complete_pending_payment(
+                db,
+                payment,
+                provider_reference=payment.provider_reference,
+                provider_payload=provider_payload,
+                paid_at=datetime.now(timezone.utc),
+            )
+        else:
+            completed = repair_billing.complete_pending_payment(
+                db,
+                payment,
+                provider_reference=payment.provider_reference,
+                provider_payload=provider_payload,
+                paid_at=datetime.now(timezone.utc),
+            )
         customer_message = "M-Pesa confirmed by status query. Receipt can be generated."
         return MpesaStkQueryResponse(
             payment=completed,
@@ -463,12 +690,13 @@ def query_sale_stk_payment(
     record_audit(
         db,
         actor_id=principal.user_id,
-        branch_id=sale.branch_id,
+        branch_id=payment.branch_id,
         action="mpesa.stk_push_status_checked",
         resource_type="payment",
         resource_id=payment.id,
         after={
-            "sale_id": str(sale.id),
+            "sale_id": str(sale.id) if sale else None,
+            "repair_ticket_id": str(repair_ticket.id) if repair_ticket else None,
             "checkout_request_id": checkout_request_id,
             "result_code": result_code,
             "status": payment.status.value,
@@ -515,9 +743,18 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
         "merchant_request_id": merchant_request_id,
         "checkout_request_id": checkout_request_id,
     }
+    sale = db.get(Sale, payment.sale_id) if payment.sale_id else None
+    repair_ticket = (
+        db.get(RepairTicket, payment.repair_ticket_id)
+        if payment.repair_ticket_id
+        else None
+    )
+    session_actor_id = None
+    if payment.till_session_id is not None:
+        session = db.get(TillSession, payment.till_session_id)
+        session_actor_id = session.cashier_id if session else None
 
     if result_code != 0:
-        sale = db.get(Sale, payment.sale_id) if payment.sale_id else None
         if payment.status == PaymentStatus.COMPLETED:
             payment.provider_payload = provider_payload
             db.flush()
@@ -535,7 +772,7 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
         db.flush()
         record_audit(
             db,
-            actor_id=sale.cashier_id if sale else None,
+            actor_id=sale.cashier_id if sale else session_actor_id,
             branch_id=payment.branch_id,
             action="mpesa.stk_push_failed",
             resource_type="payment",
@@ -556,16 +793,21 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
     receipt_number = str(metadata.get("MpesaReceiptNumber") or checkout_request_id)
     provider_payload["metadata"] = metadata
     if payment.status in {PaymentStatus.FAILED, PaymentStatus.CANCELLED}:
-        sale = db.get(Sale, payment.sale_id) if payment.sale_id else None
-        outstanding = (
-            sales.money(sale.total_amount - sale.paid_amount)
-            if sale is not None
-            else Decimal("0.00")
+        sale_outstanding = (
+            sales.money(sale.total_amount - sale.paid_amount) if sale else None
+        )
+        repair_outstanding = (
+            repair_billing.balance_due(db, repair_ticket) if repair_ticket else None
         )
         if (
             sale is not None
             and sale.status == SaleStatus.PENDING_PAYMENT
-            and payment.amount <= outstanding
+            and sale_outstanding is not None
+            and payment.amount <= sale_outstanding
+        ) or (
+            repair_ticket is not None
+            and repair_outstanding is not None
+            and payment.amount <= repair_outstanding
         ):
             payment.status = PaymentStatus.PENDING
         else:
@@ -577,7 +819,7 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
             db.flush()
             record_audit(
                 db,
-                actor_id=sale.cashier_id if sale else None,
+                actor_id=sale.cashier_id if sale else session_actor_id,
                 branch_id=payment.branch_id,
                 action="mpesa.late_success_needs_review",
                 resource_type="payment",
@@ -595,13 +837,33 @@ def handle_stk_callback(db: Session, payload: dict) -> dict[str, object]:
                 "provider_reference": receipt_number,
             }
 
-    completed = sales.complete_pending_payment(
-        db,
-        payment,
-        provider_reference=receipt_number,
-        provider_payload=provider_payload,
-        paid_at=_transaction_datetime(metadata.get("TransactionDate")),
-    )
+    if sale is not None:
+        completed = sales.complete_pending_payment(
+            db,
+            payment,
+            provider_reference=receipt_number,
+            provider_payload=provider_payload,
+            paid_at=_transaction_datetime(metadata.get("TransactionDate")),
+        )
+    elif repair_ticket is not None:
+        completed = repair_billing.complete_pending_payment(
+            db,
+            payment,
+            provider_reference=receipt_number,
+            provider_payload=provider_payload,
+            paid_at=_transaction_datetime(metadata.get("TransactionDate")),
+        )
+    else:
+        payment.provider_payload = {
+            **provider_payload,
+            "completion_error": "payment is not linked to a sale or repair",
+        }
+        db.flush()
+        return {
+            "matched": True,
+            "status": "unlinked_payment",
+            "checkout_request_id": checkout_request_id,
+        }
     return {
         "matched": True,
         "status": completed.status.value,

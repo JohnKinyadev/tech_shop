@@ -1371,6 +1371,8 @@ export function RepairsPage() {
           customer_name: customerLabel(selectedTicket.customer_id).split(" / ")[0],
           customer_phone: customerPhone(selectedTicket.customer_id),
           device_description: `${selectedTicket.device_brand} ${selectedTicket.device_model}`,
+          service_description:
+            selectedTicket.diagnosis || selectedTicket.reported_issue,
           labor_amount: String(derivedInvoice.labor),
           parts_amount: String(derivedInvoice.parts),
           total_amount: String(total),

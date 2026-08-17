@@ -21,11 +21,13 @@ import {
   listSerializedUnits,
   listTills,
   manuallyConfirmMpesaPayment,
+  manuallyConfirmRepairMpesaPayment,
   markPaymentAttemptOutcome,
   openTillSession,
   queryMpesaPaymentStatus,
   recordFailedPaymentAttempt,
   sendMpesaStkPush,
+  sendRepairMpesaStkPush,
 } from "../api/client";
 import type {
   CatalogProduct,
@@ -192,6 +194,12 @@ export function PosPage() {
   const [repairPaymentAmount, setRepairPaymentAmount] = useState("");
   const [repairPaymentReference, setRepairPaymentReference] = useState("");
   const [repairPaymentNotes, setRepairPaymentNotes] = useState("");
+  const [repairMpesaPhone, setRepairMpesaPhone] = useState("");
+  const [repairMpesaReceiptCode, setRepairMpesaReceiptCode] = useState("");
+  const [repairPaymentStatus, setRepairPaymentStatus] = useState<string | null>(null);
+  const [repairPendingPayment, setRepairPendingPayment] = useState<Payment | null>(
+    null,
+  );
   const [recentSales, setRecentSales] = useState<PosSale[]>([]);
   const [historyStatus, setHistoryStatus] = useState<SalesHistoryStatus>("all");
   const [historySearch, setHistorySearch] = useState("");
@@ -285,6 +293,10 @@ export function PosPage() {
   useEffect(() => {
     if (!selectedRepairInvoice) {
       setRepairPaymentAmount("");
+      setRepairMpesaPhone("");
+      setRepairMpesaReceiptCode("");
+      setRepairPendingPayment(null);
+      setRepairPaymentStatus(null);
       return;
     }
     setRepairPaymentAmount(
@@ -294,6 +306,10 @@ export function PosPage() {
     );
     setRepairPaymentReference("");
     setRepairPaymentNotes("");
+    setRepairMpesaPhone(selectedRepairInvoice.customer_phone ?? "");
+    setRepairMpesaReceiptCode("");
+    setRepairPendingPayment(null);
+    setRepairPaymentStatus(null);
   }, [selectedRepairInvoice?.ticket_id, selectedRepairInvoice?.balance_due]);
 
   const categories = useMemo(
@@ -426,6 +442,102 @@ export function PosPage() {
     }
   }
 
+  async function refreshSelectedRepairInvoice(
+    ticketId: string,
+    message?: string,
+    openReceipt = false,
+  ) {
+    if (!token) throw new Error("Sign in before loading repair invoice.");
+    const updatedInvoice = await getRepairInvoice(token, ticketId);
+    setSelectedRepairInvoice(updatedInvoice);
+    setRepairPickups((current) => {
+      if (current.some((invoice) => invoice.ticket_id === updatedInvoice.ticket_id)) {
+        return current.map((invoice) =>
+          invoice.ticket_id === updatedInvoice.ticket_id ? updatedInvoice : invoice,
+        );
+      }
+      return [updatedInvoice, ...current];
+    });
+    if (openReceipt) {
+      setRepairReceiptViewer(updatedInvoice);
+    }
+    if (message) {
+      setNotice(message);
+    }
+    return updatedInvoice;
+  }
+
+  async function waitForRepairMpesaCompletion(paymentId: string, ticketId: string) {
+    if (!token) return false;
+
+    for (let attempt = 0; attempt < mpesaPollSchedule.length; attempt += 1) {
+      const delay = mpesaPollSchedule[attempt];
+      setRepairPaymentStatus(
+        `M-Pesa prompt sent. Checking repair payment ${attempt + 1}/${mpesaPollSchedule.length}...`,
+      );
+      await wait(delay);
+      const result = await queryMpesaPaymentStatus(token, paymentId);
+      setRepairPendingPayment(result.payment);
+      setRepairPaymentStatus(result.customer_message);
+
+      if (result.payment.status === "completed") {
+        await refreshSelectedRepairInvoice(
+          ticketId,
+          "Repair M-Pesa payment received and receipt generated.",
+          true,
+        );
+        setRepairPendingPayment(null);
+        setRepairMpesaReceiptCode("");
+        return true;
+      }
+
+      if (["failed", "cancelled"].includes(result.payment.status)) {
+        return false;
+      }
+    }
+
+    return false;
+  }
+
+  async function manuallyCompleteRepairMpesaPayment() {
+    if (!selectedRepairInvoice || !token || isPreview) {
+      setNotice("Select a live repair invoice first.");
+      return;
+    }
+    if (!repairMpesaReceiptCode.trim()) {
+      setNotice("Enter the M-Pesa receipt code from the customer's SMS.");
+      return;
+    }
+
+    setRepairPickupBusy(true);
+    setRepairPaymentStatus("Confirming repair M-Pesa receipt code...");
+    try {
+      await manuallyConfirmRepairMpesaPayment(
+        token,
+        selectedRepairInvoice.ticket_id,
+        {
+          provider_reference: repairMpesaReceiptCode.trim(),
+          notes: "Cashier confirmed delayed repair M-Pesa callback from customer SMS.",
+        },
+      );
+      await refreshSelectedRepairInvoice(
+        selectedRepairInvoice.ticket_id,
+        "Repair M-Pesa payment manually confirmed and receipt generated.",
+        true,
+      );
+      setRepairPendingPayment(null);
+      setRepairMpesaReceiptCode("");
+      setRepairPaymentStatus(null);
+    } catch (error) {
+      const message =
+        error instanceof Error ? error.message : "Could not confirm repair M-Pesa payment.";
+      setNotice(message);
+      setRepairPaymentStatus(message);
+    } finally {
+      setRepairPickupBusy(false);
+    }
+  }
+
   async function recordRepairPickupPayment(event: FormEvent) {
     event.preventDefault();
     if (!selectedRepairInvoice) {
@@ -448,36 +560,78 @@ export function PosPage() {
       setNotice("Repair payment cannot exceed the remaining balance.");
       return;
     }
-    if (repairPaymentMethod !== "cash" && !repairPaymentReference.trim()) {
-      setNotice("Enter the payment reference for M-Pesa or card payments.");
+    if (repairPaymentMethod === "card" && !repairPaymentReference.trim()) {
+      setNotice("Enter the card payment reference.");
+      return;
+    }
+    if (
+      repairPaymentMethod === "mpesa" &&
+      !repairPaymentReference.trim() &&
+      !repairMpesaPhone.trim()
+    ) {
+      setNotice("Enter the customer's M-Pesa phone or receipt code.");
       return;
     }
 
     setRepairPickupBusy(true);
+    setRepairPaymentStatus(null);
     try {
+      if (repairPaymentMethod === "mpesa" && !repairPaymentReference.trim()) {
+        setRepairPaymentStatus("Sending repair M-Pesa prompt to customer...");
+        const prompt = await sendRepairMpesaStkPush(
+          token,
+          selectedRepairInvoice.ticket_id,
+          {
+            till_session_id: tillSession.id,
+            phone_number: repairMpesaPhone.trim(),
+            amount: repairPaymentValue,
+            idempotency_key: idempotencyKey(),
+            notes:
+              repairPaymentNotes.trim() ||
+              `Repair pickup M-Pesa payment for ${selectedRepairInvoice.ticket_number}`,
+          },
+        );
+        setRepairPendingPayment(prompt.payment);
+        setRepairPaymentStatus(prompt.customer_message);
+        setNotice(prompt.customer_message);
+        const completed = await waitForRepairMpesaCompletion(
+          prompt.payment.id,
+          selectedRepairInvoice.ticket_id,
+        );
+        if (!completed) {
+          setRepairPaymentStatus(
+            "M-Pesa prompt sent. Waiting for callback or manual confirmation.",
+          );
+          setNotice(
+            "Repair M-Pesa prompt sent. If the customer has paid but the receipt is not generated, enter their M-Pesa receipt code below.",
+          );
+        }
+        return;
+      }
+
       await addRepairPayment(token, selectedRepairInvoice.ticket_id, {
         till_session_id: tillSession.id,
         method: repairPaymentMethod,
         amount: repairPaymentValue,
         provider_reference:
           repairPaymentMethod === "cash" ? null : repairPaymentReference.trim(),
-        payer_phone: selectedRepairInvoice.customer_phone,
+        payer_phone:
+          repairPaymentMethod === "mpesa"
+            ? repairMpesaPhone.trim() || selectedRepairInvoice.customer_phone
+            : selectedRepairInvoice.customer_phone,
         payer_name: selectedRepairInvoice.customer_name,
         payer_account_reference: selectedRepairInvoice.ticket_number,
         idempotency_key: idempotencyKey(),
         notes: repairPaymentNotes.trim() || "Repair pickup payment received at POS",
       });
-      const updatedInvoice = await getRepairInvoice(
-        token,
+      const updatedInvoice = await refreshSelectedRepairInvoice(
         selectedRepairInvoice.ticket_id,
+        undefined,
+        true,
       );
-      setSelectedRepairInvoice(updatedInvoice);
-      setRepairPickups((current) =>
-        current.map((invoice) =>
-          invoice.ticket_id === updatedInvoice.ticket_id ? updatedInvoice : invoice,
-        ),
-      );
-      setRepairReceiptViewer(updatedInvoice);
+      setRepairPendingPayment(null);
+      setRepairMpesaReceiptCode("");
+      setRepairPaymentStatus(null);
       setNotice(
         Number(updatedInvoice.balance_due) === 0
           ? `${updatedInvoice.ticket_number} fully paid. Hand over the device to complete collection.`
@@ -2044,15 +2198,35 @@ export function PosPage() {
                     </label>
                     {repairPaymentMethod !== "cash" && (
                       <label>
-                        Reference
+                        {repairPaymentMethod === "mpesa"
+                          ? "M-Pesa receipt code"
+                          : "Card reference"}
                         <input
                           name="repair_payment_reference"
                           value={repairPaymentReference}
                           onChange={(event) =>
                             setRepairPaymentReference(event.target.value)
                           }
-                          placeholder="M-Pesa code or card reference"
+                          placeholder={
+                            repairPaymentMethod === "mpesa"
+                              ? "Optional: enter code if customer already paid"
+                              : "Card terminal approval/reference"
+                          }
                         />
+                      </label>
+                    )}
+                    {repairPaymentMethod === "mpesa" && (
+                      <label>
+                        M-Pesa phone
+                        <input
+                          name="repair_mpesa_phone"
+                          value={repairMpesaPhone}
+                          onChange={(event) => setRepairMpesaPhone(event.target.value)}
+                          placeholder="07XXXXXXXX"
+                        />
+                        <small>
+                          Leave receipt code empty to send a customer STK prompt.
+                        </small>
                       </label>
                     )}
                     <label>
@@ -2072,9 +2246,51 @@ export function PosPage() {
                         Boolean(token && !isPreview && !tillSession)
                       }
                     >
-                      {repairPickupBusy ? "Saving..." : "Record payment"}
+                      {repairPickupBusy
+                        ? "Processing..."
+                        : repairPaymentMethod === "mpesa" &&
+                            !repairPaymentReference.trim()
+                          ? "Send M-Pesa prompt"
+                          : "Record payment"}
                     </button>
                   </form>
+
+                  {repairPaymentStatus && (
+                    <div className="repair-pickup-warning">
+                      {repairPaymentStatus}
+                    </div>
+                  )}
+
+                  {repairPendingPayment && repairPendingPayment.status === "pending" && (
+                    <section className="manual-mpesa-panel repair-mpesa-confirm">
+                      <div>
+                        <strong>Waiting for M-Pesa callback</strong>
+                        <span>
+                          If the customer has paid but the receipt has not appeared,
+                          enter the receipt code from their SMS.
+                        </span>
+                      </div>
+                      <label>
+                        M-Pesa receipt code
+                        <input
+                          name="repair_mpesa_receipt_code"
+                          value={repairMpesaReceiptCode}
+                          onChange={(event) =>
+                            setRepairMpesaReceiptCode(event.target.value)
+                          }
+                          placeholder="e.g. QH123ABC45"
+                        />
+                      </label>
+                      <button
+                        type="button"
+                        className="secondary-button"
+                        disabled={repairPickupBusy || !repairMpesaReceiptCode.trim()}
+                        onClick={() => void manuallyCompleteRepairMpesaPayment()}
+                      >
+                        Confirm repair M-Pesa
+                      </button>
+                    </section>
+                  )}
 
                   <section className="repair-pickup-payments">
                     <header>
@@ -2335,7 +2551,7 @@ export function PosPage() {
                   <span>{repairReceiptViewer.device_description}</span>
                 </div>
                 <div>
-                  <span>Invoice status</span>
+                  <span>Receipt date</span>
                   <strong>{repairReceiptViewer.payment_status.replace(/_/g, " ")}</strong>
                   <span>{new Date().toLocaleString()}</span>
                 </div>
@@ -2363,17 +2579,20 @@ export function PosPage() {
               <table className="data-table">
                 <thead>
                   <tr>
-                    <th>Description</th>
+                    <th>Service offered</th>
                     <th>Amount</th>
                   </tr>
                 </thead>
                 <tbody>
                   <tr>
-                    <td>Repair labor</td>
+                    <td>
+                      <strong>{repairReceiptViewer.service_description}</strong>
+                      <span>{repairReceiptViewer.device_description}</span>
+                    </td>
                     <td>{money(Number(repairReceiptViewer.labor_amount))}</td>
                   </tr>
                   <tr>
-                    <td>Parts used</td>
+                    <td>Parts used during repair</td>
                     <td>{money(Number(repairReceiptViewer.parts_amount))}</td>
                   </tr>
                 </tbody>
@@ -2410,10 +2629,10 @@ export function PosPage() {
               </div>
 
               <div className="receipt-footer-note">
-                <strong>Repair pickup slip</strong>
+                <strong>Thank you for trusting us with your device.</strong>
                 <span>
-                  Device should only be released after the invoice is fully paid and
-                  the cashier completes handover.
+                  Keep this repair receipt for warranty follow-up and future service
+                  tracking.
                 </span>
               </div>
             </div>

@@ -110,6 +110,7 @@ def _invoice_response(
         device_description=(
             f"{ticket.device_brand} {ticket.device_model} ({ticket.device_type})"
         ),
+        service_description=ticket.diagnosis or ticket.reported_issue,
         labor_amount=labor,
         parts_amount=parts,
         total_amount=total,
@@ -196,13 +197,15 @@ def _open_payment_session(
     return session
 
 
-def add_payment(
+def payment_context(
     db: Session,
     principal: AuthPrincipal,
     ticket_id: UUID,
-    payload: RepairPaymentCreate,
-) -> PaymentResponse:
-    ticket = _billing_ticket(db, principal, ticket_id, lock=True)
+    till_session_id: UUID,
+    *,
+    lock: bool = False,
+) -> tuple[RepairTicket, TillSession, Decimal]:
+    ticket = _billing_ticket(db, principal, ticket_id, lock=lock)
     if principal.role_code != ADMIN and "sales.process" not in principal.permissions:
         raise AuthorizationError("only checkout staff can receive repair payments")
     if ticket.status in {
@@ -215,7 +218,129 @@ def add_payment(
         RepairStatus.COLLECTED,
     }:
         raise ConflictError("repair is not eligible for payment")
-    _open_payment_session(db, principal, payload.till_session_id, ticket.branch_id)
+    session = _open_payment_session(db, principal, till_session_id, ticket.branch_id)
+    _, _, _, _, due, _ = _invoice_values(db, ticket)
+    return ticket, session, due
+
+
+def balance_due(db: Session, ticket: RepairTicket) -> Decimal:
+    _, _, _, _, due, _ = _invoice_values(db, ticket)
+    return due
+
+
+def complete_pending_payment(
+    db: Session,
+    payment: Payment,
+    *,
+    provider_reference: str | None,
+    provider_payload: dict | None,
+    paid_at: datetime | None = None,
+) -> PaymentResponse:
+    if payment.status == PaymentStatus.COMPLETED:
+        if provider_reference and provider_reference != payment.provider_reference:
+            duplicate = db.scalar(
+                select(Payment.id).where(
+                    Payment.provider_reference == provider_reference,
+                    Payment.id != payment.id,
+                    Payment.is_deleted.is_(False),
+                )
+            )
+            if duplicate is not None:
+                raise ConflictError("payment provider reference is already in use")
+            payment.provider_reference = provider_reference
+        if provider_payload:
+            payment.provider_payload = {
+                **(payment.provider_payload or {}),
+                **provider_payload,
+            }
+            if not payment.payer_phone and provider_payload.get("phone_number"):
+                payment.payer_phone = str(provider_payload["phone_number"])
+            if (
+                not payment.payer_account_reference
+                and provider_payload.get("account_reference")
+            ):
+                payment.payer_account_reference = str(
+                    provider_payload["account_reference"]
+                )
+        if paid_at and payment.paid_at is None:
+            payment.paid_at = paid_at
+        db.flush()
+        return PaymentResponse.model_validate(payment)
+
+    if payment.status != PaymentStatus.PENDING:
+        raise ConflictError("only pending payments can be completed")
+    if payment.repair_ticket_id is None:
+        raise ConflictError("payment is not linked to a repair ticket")
+
+    ticket = db.scalar(
+        select(RepairTicket)
+        .where(
+            RepairTicket.id == payment.repair_ticket_id,
+            RepairTicket.is_deleted.is_(False),
+        )
+        .with_for_update()
+    )
+    if ticket is None:
+        raise NotFoundError("repair ticket not found")
+    due = balance_due(db, ticket)
+    if payment.amount > due:
+        raise ValidationError("payment exceeds the repair balance")
+    if provider_reference and provider_reference != payment.provider_reference:
+        duplicate = db.scalar(
+            select(Payment.id).where(
+                Payment.provider_reference == provider_reference,
+                Payment.id != payment.id,
+                Payment.is_deleted.is_(False),
+            )
+        )
+        if duplicate is not None:
+            raise ConflictError("payment provider reference is already in use")
+
+    now = paid_at or datetime.now(timezone.utc)
+    payment.status = PaymentStatus.COMPLETED
+    payment.provider_reference = provider_reference or payment.provider_reference
+    payment.provider_payload = {
+        **(payment.provider_payload or {}),
+        **(provider_payload or {}),
+    }
+    if provider_payload:
+        if not payment.payer_phone and provider_payload.get("phone_number"):
+            payment.payer_phone = str(provider_payload["phone_number"])
+        if (
+            not payment.payer_account_reference
+            and provider_payload.get("account_reference")
+        ):
+            payment.payer_account_reference = str(
+                provider_payload["account_reference"]
+            )
+    payment.paid_at = now
+    db.flush()
+
+    cashier_id = None
+    if payment.till_session_id is not None:
+        session = db.get(TillSession, payment.till_session_id)
+        cashier_id = session.cashier_id if session else None
+    record_audit(
+        db,
+        actor_id=cashier_id,
+        branch_id=ticket.branch_id,
+        action="repair.payment_recorded",
+        resource_type="repair_ticket",
+        resource_id=ticket.id,
+        after={"amount": str(payment.amount), "method": payment.method.value},
+    )
+    return PaymentResponse.model_validate(payment)
+
+
+def add_payment(
+    db: Session,
+    principal: AuthPrincipal,
+    ticket_id: UUID,
+    payload: RepairPaymentCreate,
+) -> PaymentResponse:
+    ticket, _, due = payment_context(
+        db, principal, ticket_id, payload.till_session_id, lock=True
+    )
     existing = db.scalar(
         select(Payment).where(Payment.idempotency_key == payload.idempotency_key)
     )
@@ -233,7 +358,6 @@ def add_payment(
         )
     ):
         raise ConflictError("payment provider reference is already in use")
-    _, _, _, _, due, _ = _invoice_values(db, ticket)
     if payload.amount > due:
         raise ValidationError("payment exceeds the repair balance")
     now = datetime.now(timezone.utc)

@@ -62,6 +62,8 @@ def test_repair_routes_are_exposed() -> None:
     assert "/api/v1/staff/repairs/technicians" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/invoice" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/payments" in paths
+    assert "/api/v1/staff/repairs/{ticket_id}/mpesa/stk-push" in paths
+    assert "/api/v1/staff/repairs/{ticket_id}/mpesa/manual-confirm" in paths
     assert "/api/v1/staff/repairs/{ticket_id}/collect" in paths
 
 

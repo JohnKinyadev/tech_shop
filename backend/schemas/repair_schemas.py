@@ -164,6 +164,7 @@ class RepairInvoiceResponse(BaseSchema):
     customer_name: str
     customer_phone: str
     device_description: str
+    service_description: str
     labor_amount: Decimal
     parts_amount: Decimal
     total_amount: Decimal
