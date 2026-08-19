@@ -3986,6 +3986,11 @@ button:disabled {
   font-size: 20px;
 }
 
+.repair-collected-card {
+  display: grid;
+  gap: 10px;
+}
+
 .repair-pickup-device {
   display: grid;
   gap: 4px;
@@ -4008,6 +4013,10 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: var(--radius);
   background: var(--panel-soft);
+}
+
+.repair-collected-card .repair-pickup-totals {
+  grid-template-columns: repeat(3, minmax(0, 1fr));
 }
 
 .repair-pickup-totals__balance {
@@ -4048,6 +4057,22 @@ button:disabled {
 .repair-pickup-payment button {
   grid-column: 1 / -1;
   min-height: 40px;
+}
+
+.repair-action-hint {
+  flex: 1 1 auto;
+  padding: 9px 10px;
+  color: #6d4f05;
+  border: 1px solid #f2d488;
+  border-radius: var(--radius);
+  background: #fff8e8;
+  font-size: 13px;
+  font-weight: 700;
+}
+
+.repair-pickup-actions .success-button:disabled {
+  cursor: wait;
+  opacity: 1;
 }
 
 .repair-pickup-payments {

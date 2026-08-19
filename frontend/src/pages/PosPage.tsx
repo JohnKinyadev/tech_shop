@@ -35,6 +35,7 @@ import type {
   Payment,
   PosProduct,
   PosSale,
+  RepairCollection,
   RepairInvoice,
   Receipt,
   SerializedUnit,
@@ -63,6 +64,10 @@ type SplitBalanceState = "ready" | "remaining" | "over";
 type PosPageProps = {
   focusRepairTicketId?: string | null;
   onRepairFocusHandled?: () => void;
+};
+
+type CollectedRepairSnapshot = RepairCollection & {
+  invoice: RepairInvoice;
 };
 
 type HeldOrder = {
@@ -194,6 +199,8 @@ export function PosPage({
   const [repairPickups, setRepairPickups] = useState<RepairInvoice[]>([]);
   const [selectedRepairInvoice, setSelectedRepairInvoice] =
     useState<RepairInvoice | null>(null);
+  const [lastCollectedRepair, setLastCollectedRepair] =
+    useState<CollectedRepairSnapshot | null>(null);
   const [repairReceiptViewer, setRepairReceiptViewer] =
     useState<RepairInvoice | null>(null);
   const [repairPickupBusy, setRepairPickupBusy] = useState(false);
@@ -315,6 +322,7 @@ export function PosPage({
         if (!active) return;
 
         setSelectedRepairInvoice(invoice);
+        setLastCollectedRepair(null);
         setRepairPickups((current) => {
           if (current.some((item) => item.ticket_id === invoice.ticket_id)) {
             return current.map((item) =>
@@ -446,10 +454,17 @@ export function PosPage({
   const selectedRepairPaid = Number(selectedRepairInvoice?.paid_amount ?? 0);
   const repairPaymentValue = Number(repairPaymentAmount) || 0;
   const selectedRepairIsPaid = Math.round(selectedRepairBalance * 100) === 0;
+  const collectRepairIssue = !selectedRepairInvoice
+    ? null
+    : !token || isPreview
+      ? "Live cashier login required before completing device collection."
+      : !tillSession
+        ? "Open your till before handing over repaired devices."
+        : !selectedRepairIsPaid
+          ? `Collect the remaining ${money(selectedRepairBalance)} before handover.`
+          : null;
   const canCollectSelectedRepair =
-    Boolean(selectedRepairInvoice) &&
-    selectedRepairIsPaid &&
-    (!token || isPreview || Boolean(tillSession));
+    Boolean(selectedRepairInvoice) && !collectRepairIssue;
 
   async function refreshRecentSales() {
     if (!token || isPreview || !user?.branch_id) return;
@@ -469,6 +484,7 @@ export function PosPage({
 
   function selectRepairPickup(invoice: RepairInvoice) {
     setSelectedRepairInvoice(invoice);
+    setLastCollectedRepair(null);
     setActiveWorkspaceTab("repair_pickups");
   }
 
@@ -721,18 +737,17 @@ export function PosPage({
 
     setRepairPickupBusy(true);
     try {
+      const collectedInvoice = selectedRepairInvoice;
       const collection = await collectRepair(token, selectedRepairInvoice.ticket_id);
       setRepairPickups((current) =>
         current.filter((invoice) => invoice.ticket_id !== collection.ticket_id),
       );
-      setSelectedRepairInvoice((current) => {
-        if (!current || current.ticket_id !== collection.ticket_id) return current;
-        const next = repairPickups.find(
-          (invoice) => invoice.ticket_id !== collection.ticket_id,
-        );
-        return next ?? null;
+      setSelectedRepairInvoice(null);
+      setLastCollectedRepair({
+        ...collection,
+        invoice: collectedInvoice,
       });
-      setNotice(`${collection.ticket_number} collected and removed from pickup queue.`);
+      setNotice(`${collection.ticket_number} collected. Device handover is complete.`);
     } catch (error) {
       setNotice(
         error instanceof Error ? error.message : "Could not complete repair collection.",
@@ -2161,7 +2176,7 @@ export function PosPage({
             </section>
 
             <section className="repair-pickup-detail">
-              {!selectedRepairInvoice && (
+              {!selectedRepairInvoice && !lastCollectedRepair && (
                 <div className="pos-empty-state">
                   <strong>Select a repair invoice</strong>
                   <span>
@@ -2169,6 +2184,62 @@ export function PosPage({
                     then complete collection from here.
                   </span>
                 </div>
+              )}
+
+              {!selectedRepairInvoice && lastCollectedRepair && (
+                <article className="repair-collected-card">
+                  <header>
+                    <div>
+                      <p className="eyebrow">Collection complete</p>
+                      <h2>{lastCollectedRepair.ticket_number}</h2>
+                      <span>
+                        {lastCollectedRepair.invoice.customer_name} /{" "}
+                        {lastCollectedRepair.invoice.customer_phone}
+                      </span>
+                    </div>
+                    <StatusPill tone="success">Collected</StatusPill>
+                  </header>
+
+                  <div className="repair-pickup-device">
+                    <span>Device handed over</span>
+                    <strong>{lastCollectedRepair.invoice.device_description}</strong>
+                  </div>
+
+                  <div className="repair-pickup-totals">
+                    <div>
+                      <span>Total paid</span>
+                      <strong>
+                        {money(Number(lastCollectedRepair.invoice.total_amount))}
+                      </strong>
+                    </div>
+                    <div>
+                      <span>Status</span>
+                      <strong>{lastCollectedRepair.status.replace(/_/g, " ")}</strong>
+                    </div>
+                    <div className="repair-pickup-totals__balance">
+                      <span>Collected at</span>
+                      <strong>{dateLabel(lastCollectedRepair.collected_at)}</strong>
+                    </div>
+                  </div>
+
+                  <div className="repair-pickup-actions">
+                    <button
+                      type="button"
+                      onClick={() =>
+                        setRepairReceiptViewer(lastCollectedRepair.invoice)
+                      }
+                    >
+                      Print / view invoice
+                    </button>
+                    <button
+                      type="button"
+                      className="secondary-button"
+                      onClick={() => setLastCollectedRepair(null)}
+                    >
+                      Clear confirmation
+                    </button>
+                  </div>
+                </article>
               )}
 
               {selectedRepairInvoice && (
@@ -2387,14 +2458,22 @@ export function PosPage({
                   </section>
 
                   <div className="repair-pickup-actions">
-                    <button
-                      type="button"
-                      className="success-button"
-                      disabled={repairPickupBusy || !canCollectSelectedRepair}
-                      onClick={() => void completeRepairPickup()}
-                    >
-                      Hand over device
-                    </button>
+                    {canCollectSelectedRepair ? (
+                      <button
+                        type="button"
+                        className="success-button"
+                        disabled={repairPickupBusy}
+                        onClick={() => void completeRepairPickup()}
+                      >
+                        {repairPickupBusy
+                          ? "Completing collection..."
+                          : "Hand over device"}
+                      </button>
+                    ) : (
+                      <div className="repair-action-hint">
+                        {collectRepairIssue}
+                      </div>
+                    )}
                     <button
                       type="button"
                       onClick={() => setRepairReceiptViewer(selectedRepairInvoice)}
