@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useCallback, useEffect, useState } from "react";
 
 import { AppShell, canAccessView, firstAccessibleView, type AppView } from "./components/AppShell";
 import { CatalogPage } from "./pages/CatalogPage";
@@ -19,6 +19,8 @@ export function App() {
   const { user } = useAuth();
   const [activeView, setActiveView] = useState<AppView>("dashboard");
   const [theme, setTheme] = useState<ThemeChoice>(getStoredTheme);
+  const [repairPaymentFocusTicketId, setRepairPaymentFocusTicketId] =
+    useState<string | null>(null);
   const safeView = user && canAccessView(user, activeView) ? activeView : firstAccessibleView(user);
 
   useEffect(() => {
@@ -31,16 +33,34 @@ export function App() {
     }
   }, [activeView, safeView, user]);
 
+  const openRepairPaymentInPos = useCallback((ticketId: string) => {
+    setRepairPaymentFocusTicketId(ticketId);
+    setActiveView("pos");
+  }, []);
+
+  const clearRepairPaymentFocus = useCallback(() => {
+    setRepairPaymentFocusTicketId(null);
+  }, []);
+
   if (!user) {
     return <LoginPage />;
   }
 
   function renderView(view: AppView) {
     if (view === "dashboard") return <DashboardPage onNavigate={setActiveView} />;
-    if (view === "pos") return <PosPage />;
+    if (view === "pos") {
+      return (
+        <PosPage
+          focusRepairTicketId={repairPaymentFocusTicketId}
+          onRepairFocusHandled={clearRepairPaymentFocus}
+        />
+      );
+    }
     if (view === "catalog") return <CatalogPage />;
     if (view === "inventory") return <InventoryPage />;
-    if (view === "repairs") return <RepairsPage />;
+    if (view === "repairs") {
+      return <RepairsPage onOpenRepairPayment={openRepairPaymentInPos} />;
+    }
     if (view === "purchases") return <PurchasesPage />;
     if (view === "expenses") return <ExpensesPage />;
     if (view === "reports") return <ReportsPage />;

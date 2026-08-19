@@ -60,6 +60,11 @@ type PosWorkspaceTab = "products" | "receipts" | "repair_pickups" | "held";
 type SalesHistoryStatus = "all" | "completed" | "pending_payment" | "cancelled";
 type SplitBalanceState = "ready" | "remaining" | "over";
 
+type PosPageProps = {
+  focusRepairTicketId?: string | null;
+  onRepairFocusHandled?: () => void;
+};
+
 type HeldOrder = {
   id: string;
   label: string;
@@ -154,7 +159,10 @@ function productsFromApi(products: CatalogProduct[]): PosProduct[] {
   );
 }
 
-export function PosPage() {
+export function PosPage({
+  focusRepairTicketId = null,
+  onRepairFocusHandled,
+}: PosPageProps) {
   const { token, isPreview, user } = useAuth();
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState("All");
@@ -289,6 +297,53 @@ export function PosPage() {
   useEffect(() => {
     void refreshRepairPickups();
   }, [isPreview, token, user?.branch_id]);
+
+  useEffect(() => {
+    if (!focusRepairTicketId) return;
+
+    setActiveWorkspaceTab("repair_pickups");
+
+    if (!token || isPreview) {
+      onRepairFocusHandled?.();
+      return;
+    }
+
+    let active = true;
+    setRepairPickupBusy(true);
+    getRepairInvoice(token, focusRepairTicketId)
+      .then((invoice) => {
+        if (!active) return;
+
+        setSelectedRepairInvoice(invoice);
+        setRepairPickups((current) => {
+          if (current.some((item) => item.ticket_id === invoice.ticket_id)) {
+            return current.map((item) =>
+              item.ticket_id === invoice.ticket_id ? invoice : item,
+            );
+          }
+
+          return [invoice, ...current];
+        });
+        setNotice(`${invoice.ticket_number} opened in POS repair payment desk.`);
+      })
+      .catch((error) => {
+        if (!active) return;
+        setNotice(
+          error instanceof Error
+            ? error.message
+            : "Could not open repair payment in POS.",
+        );
+      })
+      .finally(() => {
+        if (!active) return;
+        setRepairPickupBusy(false);
+        onRepairFocusHandled?.();
+      });
+
+    return () => {
+      active = false;
+    };
+  }, [focusRepairTicketId, isPreview, onRepairFocusHandled, token]);
 
   useEffect(() => {
     if (!selectedRepairInvoice) {
@@ -2036,11 +2091,11 @@ export function PosPage() {
             <section className="repair-pickup-queue">
               <header>
                 <div>
-                  <p className="eyebrow">Repair handoff</p>
-                  <strong>Ready for pickup</strong>
+                  <p className="eyebrow">Repair payment desk</p>
+                  <strong>Payments & pickups</strong>
                   <span>
-                    These are the repair invoices waiting for cashier payment and
-                    customer collection in this branch.
+                    Ready repairs appear here automatically. Repairs opened from
+                    the repair desk can also be paid from this POS workspace.
                   </span>
                 </div>
                 <button

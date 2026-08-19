@@ -2,13 +2,11 @@ import { FormEvent, useEffect, useMemo, useState } from "react";
 
 import {
   addRepairPart,
-  addRepairPayment,
   assignRepairTechnician,
   cancelRepair,
   collectRepair,
   createCustomer,
   createRepairBooking,
-  currentTillSession,
   decideRepairQuote,
   getRepairInvoice,
   listRepairAvailableParts,
@@ -35,7 +33,6 @@ import type {
   RepairSummary,
   RepairTicket,
   StaffUser,
-  TillSession,
 } from "../api/types";
 import { StatusPill } from "../components/StatusPill";
 import {
@@ -113,13 +110,6 @@ const emptyPartForm = {
   quantity: "1",
 };
 
-const emptyPaymentForm = {
-  method: "cash" as "cash" | "mpesa" | "card" | "bank_transfer" | "store_credit",
-  amount: "",
-  provider_reference: "",
-  notes: "",
-};
-
 function splitList(value: string) {
   return value
     .split(/[\n,]+/)
@@ -164,7 +154,11 @@ function repairParts(ticket?: RepairTicket) {
   return ticket?.parts ?? [];
 }
 
-export function RepairsPage() {
+type RepairsPageProps = {
+  onOpenRepairPayment?: (ticketId: string) => void;
+};
+
+export function RepairsPage({ onOpenRepairPayment }: RepairsPageProps) {
   const { token, isPreview, user } = useAuth();
   const [branches, setBranches] = useState<Branch[]>(demoBranches);
   const [customers, setCustomers] = useState<Customer[]>(demoCustomers);
@@ -173,7 +167,6 @@ export function RepairsPage() {
   const [tickets, setTickets] = useState<RepairTicket[]>(demoRepairs);
   const [summary, setSummary] = useState<RepairSummary>(demoDashboard.repairs);
   const [availablePartOptions, setAvailablePartOptions] = useState<RepairPartOption[]>([]);
-  const [tillSession, setTillSession] = useState<TillSession | null>(null);
   const [invoice, setInvoice] = useState<RepairInvoice | null>(null);
   const [selectedBranchId, setSelectedBranchId] = useState(
     user?.branch_id ?? demoBranches[0]?.id ?? "",
@@ -189,7 +182,6 @@ export function RepairsPage() {
   const [partSearch, setPartSearch] = useState("");
   const [partForm, setPartForm] = useState(emptyPartForm);
   const [readyNote, setReadyNote] = useState("");
-  const [paymentForm, setPaymentForm] = useState(emptyPaymentForm);
   const [ticketSearch, setTicketSearch] = useState("");
   const [statusFilter, setStatusFilter] = useState("all");
   const [notice, setNotice] = useState<string | null>(null);
@@ -414,27 +406,6 @@ export function RepairsPage() {
     partQuantity > 0
       ? selectedPartVariant.price * partQuantity
       : 0;
-  const repairPaymentAmount = Number(paymentForm.amount);
-  const paymentNeedsReference =
-    !["cash", "store_credit"].includes(paymentForm.method);
-  const repairPaymentNeedsTill = !tillSession && Boolean(token) && !isPreview;
-  const paymentIssue = !derivedInvoice
-    ? "Invoice appears after quote approval."
-    : derivedInvoice.due <= 0
-      ? "This repair is fully paid."
-      : repairPaymentNeedsTill
-        ? "Open a till session before receiving repair payments."
-      : !Number.isFinite(repairPaymentAmount) || repairPaymentAmount <= 0
-        ? "Enter a payment amount greater than zero."
-        : repairPaymentAmount > derivedInvoice.due
-          ? `Payment cannot exceed the balance due of ${money(derivedInvoice.due)}.`
-          : paymentNeedsReference && !paymentForm.provider_reference.trim()
-            ? "Non-cash repair payments need a transaction reference."
-            : null;
-  const paymentWillClearBalance =
-    Boolean(derivedInvoice) &&
-    repairPaymentAmount > 0 &&
-    repairPaymentAmount === derivedInvoice?.due;
   const collectionIssue = !selectedTicket
     ? "Select a repair ticket first."
     : selectedTicket.status !== "ready_for_pickup"
@@ -608,18 +579,15 @@ export function RepairsPage() {
     }
 
     let active = true;
-    Promise.allSettled([
-      listRepairAvailableParts(token, selectedTicket.id, partSearch),
-      currentTillSession(token),
-    ]).then(([partsResult, tillResult]) => {
-      if (!active) return;
+    listRepairAvailableParts(token, selectedTicket.id, partSearch)
+      .then((result) => {
+        if (!active) return;
 
-      setAvailablePartOptions(
-        partsResult.status === "fulfilled" ? partsResult.value.items : [],
-      );
-
-      setTillSession(tillResult.status === "fulfilled" ? tillResult.value : null);
-    });
+        setAvailablePartOptions(result.items);
+      })
+      .catch(() => {
+        if (active) setAvailablePartOptions([]);
+      });
 
     return () => {
       active = false;
@@ -666,13 +634,6 @@ export function RepairsPage() {
       .then((result) => {
         if (!active) return;
         setInvoice(result);
-        setPaymentForm((current) => ({
-          ...current,
-          amount:
-            current.amount || Number(result.balance_due) <= 0
-              ? current.amount
-              : result.balance_due,
-        }));
       })
       .catch(() => {
         if (!active) return;
@@ -762,10 +723,6 @@ export function RepairsPage() {
       derivedInvoice !== null &&
       derivedInvoice.due <= 0
     );
-  }
-
-  function paymentIdempotencyKey() {
-    return `repair-${selectedTicket?.id ?? "ticket"}-${Date.now()}`;
   }
 
   function ticketAgeLabel(ticket: RepairTicket) {
@@ -1337,84 +1294,6 @@ export function RepairsPage() {
       setNotice(`${ticket.ticket_number} cancelled.`);
     } catch (error) {
       setNotice(error instanceof Error ? error.message : "Could not cancel repair.");
-    } finally {
-      setBusy(false);
-    }
-  }
-
-  async function handleRepairPayment(event: FormEvent) {
-    event.preventDefault();
-    if (!selectedTicket || !derivedInvoice) {
-      setNotice("Select an invoice-ready repair first.");
-      return;
-    }
-    const amount = Number(paymentForm.amount);
-    if (paymentIssue) {
-      setNotice(paymentIssue);
-      return;
-    }
-    if (!tillSession && token && !isPreview) {
-      setNotice("Open a till session before receiving repair payments.");
-      return;
-    }
-
-    setBusy(true);
-    try {
-      if (!token || isPreview) {
-        const paid = derivedInvoice.paid + amount;
-        const total = derivedInvoice.total;
-        setInvoice({
-          ticket_id: selectedTicket.id,
-          ticket_number: selectedTicket.ticket_number,
-          branch_id: selectedTicket.branch_id,
-          customer_id: selectedTicket.customer_id,
-          customer_name: customerLabel(selectedTicket.customer_id).split(" / ")[0],
-          customer_phone: customerPhone(selectedTicket.customer_id),
-          device_description: `${selectedTicket.device_brand} ${selectedTicket.device_model}`,
-          service_description:
-            selectedTicket.diagnosis || selectedTicket.reported_issue,
-          labor_amount: String(derivedInvoice.labor),
-          parts_amount: String(derivedInvoice.parts),
-          total_amount: String(total),
-          paid_amount: String(paid),
-          balance_due: String(Math.max(0, total - paid)),
-          payment_status:
-            total - paid <= 0 ? "paid" : paid > 0 ? "partially_paid" : "unpaid",
-          payments: [
-            {
-              method: paymentForm.method,
-              amount: String(amount),
-              provider_reference: paymentForm.provider_reference || null,
-              payer_phone: customerPhone(selectedTicket.customer_id),
-              payer_name: customerLabel(selectedTicket.customer_id).split(" / ")[0],
-              payer_account_reference: selectedTicket.ticket_number,
-              paid_at: new Date().toISOString(),
-            },
-            ...(invoice?.payments ?? []),
-          ],
-        });
-        setPaymentForm(emptyPaymentForm);
-        setNotice("Preview repair payment recorded locally.");
-        return;
-      }
-
-      await addRepairPayment(token, selectedTicket.id, {
-        till_session_id: tillSession!.id,
-        method: paymentForm.method,
-        amount,
-        provider_reference: paymentForm.provider_reference.trim() || null,
-        payer_phone: customerPhone(selectedTicket.customer_id),
-        payer_name: customerLabel(selectedTicket.customer_id).split(" / ")[0],
-        payer_account_reference: selectedTicket.ticket_number,
-        idempotency_key: paymentIdempotencyKey(),
-        notes: paymentForm.notes || null,
-      });
-      const updatedInvoice = await getRepairInvoice(token, selectedTicket.id);
-      setInvoice(updatedInvoice);
-      setPaymentForm(emptyPaymentForm);
-      setNotice(`Payment recorded for ${selectedTicket.ticket_number}.`);
-    } catch (error) {
-      setNotice(error instanceof Error ? error.message : "Could not record repair payment.");
     } finally {
       setBusy(false);
     }
@@ -2452,127 +2331,47 @@ export function RepairsPage() {
                 )}
 
                 {showCashierRepairHandoff && (
-                  <form onSubmit={handleRepairPayment} className="action-form">
-                  <div className="repair-form-hint">
-                    <span>Repair payment</span>
-                    <strong>
-                      {tillSession
-                        ? "Till session open"
-                        : "No open till detected"}
-                    </strong>
-                  </div>
-                  <div className="form-grid form-grid--two">
-                    <label>
-                      Method
-                      <select
-                        value={paymentForm.method}
-                        onChange={(event) =>
-                          setPaymentForm((current) => ({
-                            ...current,
-                            method: event.target.value as typeof paymentForm.method,
-                          }))
-                        }
-                      >
-                        <option value="cash">Cash</option>
-                        <option value="mpesa">M-Pesa</option>
-                        <option value="card">Card</option>
-                        <option value="bank_transfer">Bank transfer</option>
-                        <option value="store_credit">Store credit</option>
-                      </select>
-                    </label>
-                    <label>
-                      Amount
-                      <input
-                        type="number"
-                        min="1"
-                        step="0.01"
-                        max={derivedInvoice?.due ?? undefined}
-                        value={paymentForm.amount}
-                        onChange={(event) =>
-                          setPaymentForm((current) => ({
-                            ...current,
-                            amount: event.target.value,
-                          }))
-                        }
-                      />
-                    </label>
-                  </div>
-                  <div
-                    className={`repair-payment-readiness ${
-                      paymentIssue ? "is-blocked" : "is-ready"
-                    }`}
-                  >
-                    <div>
-                      <span>Payment status</span>
-                      <strong>
-                        {derivedInvoice
-                          ? titleize(derivedInvoice.status)
-                          : "No invoice yet"}
-                      </strong>
+                  <div className="action-form">
+                    <div className="repair-form-hint">
+                      <span>Repair payment</span>
+                      <strong>Complete in POS</strong>
                     </div>
-                    <small>
-                      {paymentIssue ??
-                        (paymentWillClearBalance
-                          ? "This payment clears the repair balance."
-                          : "Ready to record a partial repair payment.")}
-                    </small>
-                    {derivedInvoice && derivedInvoice.due > 0 && (
-                      <button
-                        className="secondary-button"
-                        type="button"
-                        disabled={busy}
-                        onClick={() =>
-                          setPaymentForm((current) => ({
-                            ...current,
-                            amount: String(derivedInvoice.due),
-                          }))
-                        }
-                      >
-                        Fill Balance
-                      </button>
-                    )}
+                    <div
+                      className={`repair-payment-readiness ${
+                        !derivedInvoice || derivedInvoice.due <= 0
+                          ? "is-blocked"
+                          : "is-ready"
+                      }`}
+                    >
+                      <div>
+                        <span>Payment status</span>
+                        <strong>
+                          {derivedInvoice
+                            ? titleize(derivedInvoice.status)
+                            : "No invoice yet"}
+                        </strong>
+                      </div>
+                      <small>
+                        {!derivedInvoice
+                          ? "Invoice appears after the quote is approved."
+                          : derivedInvoice.due <= 0
+                            ? "This repair invoice is already fully paid."
+                            : "Open the POS repair payment desk to record cash, card, or M-Pesa and generate the receipt."}
+                      </small>
+                    </div>
+                    <button
+                      className="primary-button"
+                      disabled={busy || !derivedInvoice || derivedInvoice.due <= 0}
+                      onClick={() => {
+                        if (!selectedTicket) return;
+                        onOpenRepairPayment?.(selectedTicket.id);
+                        setNotice("Opening POS repair payment desk...");
+                      }}
+                      type="button"
+                    >
+                      Record Repair Payment
+                    </button>
                   </div>
-                  <label>
-                    Reference
-                    <input
-                      value={paymentForm.provider_reference}
-                      onChange={(event) =>
-                        setPaymentForm((current) => ({
-                          ...current,
-                          provider_reference: event.target.value,
-                        }))
-                      }
-                      placeholder={
-                        paymentNeedsReference
-                          ? "Required for M-Pesa, card, or transfer"
-                          : "Optional cash note"
-                      }
-                    />
-                  </label>
-                  <label>
-                    Payment notes
-                    <textarea
-                      value={paymentForm.notes}
-                      onChange={(event) =>
-                        setPaymentForm((current) => ({
-                          ...current,
-                          notes: event.target.value,
-                        }))
-                      }
-                      placeholder="Optional payment context"
-                    />
-                  </label>
-                  <button
-                    className="primary-button"
-                    disabled={
-                      busy ||
-                      Boolean(paymentIssue) ||
-                      repairPaymentNeedsTill
-                    }
-                  >
-                    Record Repair Payment
-                  </button>
-                  </form>
                 )}
 
                 {showCashierRepairHandoff && (
