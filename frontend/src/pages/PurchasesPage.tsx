@@ -35,6 +35,7 @@ type VariantOption = {
   sku: string;
   trackingType: "bulk" | "serial" | "imei";
   price: number;
+  searchText: string;
 };
 
 type PurchaseDraftLine = {
@@ -123,8 +124,30 @@ function catalogToVariantOptions(products: CatalogProduct[]): VariantOption[] {
       sku: variant.sku,
       trackingType: variant.tracking_type,
       price: Number(variant.selling_price),
+      searchText: [
+        product.name,
+        product.slug,
+        variant.name,
+        variant.sku,
+        variant.tracking_type,
+      ]
+        .join(" ")
+        .toLowerCase(),
     })),
   );
+}
+
+function mergeCatalogProducts(
+  current: CatalogProduct[],
+  incoming: CatalogProduct[],
+) {
+  const byId = new Map(current.map((product) => [product.id, product]));
+  incoming.forEach((product) => byId.set(product.id, product));
+  return Array.from(byId.values());
+}
+
+function itemSkuOptionLabel(option: VariantOption) {
+  return `${option.sku} — ${option.label} — ${titleize(option.trackingType)}`;
 }
 
 function estimateUnitCost(option?: VariantOption) {
@@ -234,6 +257,7 @@ export function PurchasesPage() {
   const [orders, setOrders] = useState<PurchaseOrder[]>(demoPurchaseOrders);
   const [suppliers, setSuppliers] = useState<Supplier[]>(demoSuppliers);
   const [catalogProducts, setCatalogProducts] = useState<CatalogProduct[]>([]);
+  const [catalogProductCache, setCatalogProductCache] = useState<CatalogProduct[]>([]);
   const [selectedBranchId, setSelectedBranchId] = useState(
     user?.branch_id ?? demoBranches[0]?.id ?? "",
   );
@@ -258,25 +282,41 @@ export function PurchasesPage() {
     [suppliers],
   );
 
-  const previewVariantOptions = useMemo(() => {
-    const needle = productSearch.trim().toLowerCase();
-    return mockProducts
-      .filter((product) =>
-        !needle
-          ? true
-          : [product.name, product.variantName, product.sku, product.category]
-              .join(" ")
-              .toLowerCase()
-              .includes(needle),
-      )
-      .map((product) => ({
+  const allPreviewVariantOptions = useMemo(
+    () =>
+      mockProducts.map((product) => ({
         id: product.variantId,
         label: `${product.name} / ${product.variantName}`,
         sku: product.sku,
         trackingType: product.trackingType,
         price: product.price,
-      }));
-  }, [productSearch]);
+        searchText: [
+          product.name,
+          product.variantName,
+          product.sku,
+          product.category,
+          product.trackingType,
+        ]
+          .join(" ")
+          .toLowerCase(),
+      })),
+    [],
+  );
+
+  const previewVariantOptions = useMemo(() => {
+    const needle = productSearch.trim().toLowerCase();
+    return allPreviewVariantOptions.filter((option) =>
+      needle ? option.searchText.includes(needle) : true,
+    );
+  }, [allPreviewVariantOptions, productSearch]);
+
+  const cachedVariantOptions = useMemo(
+    () =>
+      !token || isPreview
+        ? allPreviewVariantOptions
+        : catalogToVariantOptions(catalogProductCache),
+    [allPreviewVariantOptions, catalogProductCache, isPreview, token],
+  );
 
   const variantOptions = useMemo(
     () =>
@@ -287,10 +327,23 @@ export function PurchasesPage() {
   );
 
   const variantById = useMemo(
-    () => new Map(variantOptions.map((variant) => [variant.id, variant])),
-    [variantOptions],
+    () =>
+      new Map(
+        [...cachedVariantOptions, ...variantOptions].map((variant) => [
+          variant.id,
+          variant,
+        ]),
+      ),
+    [cachedVariantOptions, variantOptions],
   );
   const selectedPurchaseVariant = variantById.get(purchaseForm.variant_id);
+  const exactSkuVariant = useMemo(() => {
+    const sku = productSearch.trim().toUpperCase();
+    if (!sku) return undefined;
+    return variantOptions.find(
+      (variant) => variant.sku.trim().toUpperCase() === sku,
+    );
+  }, [productSearch, variantOptions]);
   const selectedSupplierName = supplierById.get(purchaseForm.supplier_id);
   const selectedBranchName =
     branches.find((branch) => branch.id === selectedBranchId)?.name ?? "";
@@ -549,6 +602,9 @@ export function PurchasesPage() {
       .then((result) => {
         if (!active) return;
         setCatalogProducts(result.items);
+        setCatalogProductCache((current) =>
+          mergeCatalogProducts(current, result.items),
+        );
       })
       .catch(() => {
         if (!active) return;
@@ -592,6 +648,14 @@ export function PurchasesPage() {
     if (!variantOptions.length) return;
 
     setPurchaseForm((current) => {
+      if (exactSkuVariant && current.variant_id !== exactSkuVariant.id) {
+        return {
+          ...current,
+          variant_id: exactSkuVariant.id,
+          unit_cost: estimateUnitCost(exactSkuVariant),
+        };
+      }
+
       const stillValid = variantOptions.some(
         (variant) => variant.id === current.variant_id,
       );
@@ -604,7 +668,7 @@ export function PurchasesPage() {
         unit_cost: current.unit_cost || estimateUnitCost(firstVariant),
       };
     });
-  }, [variantOptions]);
+  }, [exactSkuVariant, variantOptions]);
 
   useEffect(() => {
     const firstItem = receivableItems[0];
@@ -623,9 +687,9 @@ export function PurchasesPage() {
     });
   }, [receivableItems]);
 
-  function variantLabel(variantId: string) {
+  function itemSkuLabel(variantId: string) {
     const variant = variantById.get(variantId);
-    return variant ? `${variant.label} (${variant.sku})` : variantId;
+    return variant ? `${variant.sku} — ${variant.label}` : variantId;
   }
 
   function selectOrder(orderId: string) {
@@ -733,7 +797,7 @@ export function PurchasesPage() {
     const taxRate = Number(purchaseForm.tax_rate || 0);
 
     if (!purchaseForm.variant_id || !selectedVariant) {
-      return { error: "Select a product variant for this purchase order." };
+      return { error: "Select an item / SKU for this purchase order." };
     }
     if (
       !Number.isFinite(orderedQuantity) ||
@@ -743,7 +807,7 @@ export function PurchasesPage() {
       return { error: "Quantity must be a whole number of at least 1." };
     }
     if (!Number.isFinite(unitCost) || unitCost <= 0) {
-      return { error: "Unit cost must be greater than 0." };
+      return { error: "Cost per item must be greater than 0." };
     }
     if (!Number.isFinite(taxRate) || taxRate < 0 || taxRate > 100) {
       return { error: "Tax rate must be between 0 and 100." };
@@ -1205,11 +1269,11 @@ export function PurchasesPage() {
 
             <div className="form-grid form-grid--two">
               <label>
-                Find product
+                Search item / SKU
                 <input
                   value={productSearch}
                   onChange={(event) => setProductSearch(event.target.value)}
-                  placeholder="Search SKU, phone, charger..."
+                  placeholder="Type SKU, phone, charger..."
                 />
               </label>
               <label>
@@ -1228,7 +1292,7 @@ export function PurchasesPage() {
             </div>
 
             <label>
-              Product variant
+              Item / SKU
               <select
                 value={purchaseForm.variant_id}
                 onChange={(event) => {
@@ -1240,13 +1304,18 @@ export function PurchasesPage() {
                   }));
                 }}
               >
-                <option value="">Select product variant</option>
+                <option value="">Select item / SKU</option>
                 {variantOptions.map((variant) => (
                   <option key={variant.id} value={variant.id}>
-                    {variant.label} / {variant.sku} / {titleize(variant.trackingType)}
+                    {itemSkuOptionLabel(variant)}
                   </option>
                 ))}
               </select>
+              {exactSkuVariant && (
+                <small>
+                  Exact SKU match selected: {exactSkuVariant.label}
+                </small>
+              )}
             </label>
 
             <div className="form-grid form-grid--three">
@@ -1265,7 +1334,7 @@ export function PurchasesPage() {
                 />
               </label>
               <label>
-                Unit cost
+                Cost per item
                 <input
                   type="number"
                   min="0"
@@ -1301,14 +1370,14 @@ export function PurchasesPage() {
                 <strong>
                   {selectedPurchaseVariant
                     ? selectedPurchaseVariant.label
-                    : "Select a product variant"}
+                    : "Select an item / SKU"}
                 </strong>
                 <small>
                   {selectedPurchaseVariant
                     ? `${selectedPurchaseVariant.sku} · ${titleize(
                         selectedPurchaseVariant.trackingType,
                       )} tracking`
-                    : "Search by product name, SKU, or category to narrow the list."}
+                    : "Search by product name, SKU, or category to narrow the dropdown."}
                 </small>
               </div>
               <div>
@@ -1420,7 +1489,7 @@ export function PurchasesPage() {
             ) : (
               <p className="muted purchase-empty-note">
                 No lines added yet. If you click Create Purchase Order now, the
-                currently selected product will be used as the first line.
+                currently selected item / SKU will be used as the first line.
               </p>
             )}
 
@@ -1705,7 +1774,7 @@ export function PurchasesPage() {
                         return (
                           <tr key={item.id}>
                             <td>
-                              <strong>{variantLabel(item.variant_id)}</strong>
+                              <strong>{itemSkuLabel(item.variant_id)}</strong>
                               <span>{money(item.unit_cost)} unit cost</span>
                             </td>
                             <td>{integer(item.ordered_quantity)}</td>
@@ -1744,7 +1813,7 @@ export function PurchasesPage() {
                           item.ordered_quantity - item.received_quantity;
                         return (
                           <option key={item.id} value={item.id}>
-                            {variantLabel(item.variant_id)} · {remaining} remaining
+                            {itemSkuLabel(item.variant_id)} · {remaining} remaining
                           </option>
                         );
                       })}
@@ -1777,7 +1846,7 @@ export function PurchasesPage() {
                       <div>
                         <span>Selected line</span>
                         <strong>
-                          {variantLabel(selectedReceiptItem.variant_id)}
+                          {itemSkuLabel(selectedReceiptItem.variant_id)}
                         </strong>
                       </div>
                       <div>
@@ -2002,7 +2071,7 @@ export function PurchasesPage() {
                               return (
                                 <span key={item.id}>
                                   {orderItem
-                                    ? variantLabel(orderItem.variant_id)
+                                    ? itemSkuLabel(orderItem.variant_id)
                                     : item.purchase_order_item_id}{" "}
                                   · {integer(item.quantity)} unit(s)
                                 </span>
