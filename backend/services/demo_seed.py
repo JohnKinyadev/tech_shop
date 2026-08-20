@@ -332,6 +332,15 @@ def _variant_by_sku(db: Session, sku: str) -> ProductVariant | None:
     )
 
 
+def _product_by_slug(db: Session, slug: str) -> Product | None:
+    return db.scalar(
+        select(Product).where(
+            func.lower(Product.slug) == slug.lower(),
+            Product.is_deleted.is_(False),
+        )
+    )
+
+
 def _product_with_variant(
     db: Session,
     result: DemoSeedResult,
@@ -348,36 +357,51 @@ def _product_with_variant(
     cost_price: Decimal,
     selling_price: Decimal,
     minimum_selling_price: Decimal | None = None,
+    attributes: dict[str, str] | None = None,
 ) -> ProductVariant:
-    variant = _variant_by_sku(db, sku)
+    normalized_sku = sku.strip().upper()
+    variant = _variant_by_sku(db, normalized_sku)
+    product: Product | None = None
+    variant_payload = ProductVariantCreate(
+        name=variant_name,
+        sku=normalized_sku,
+        tracking_type=tracking_type,
+        attributes=attributes or {},
+        cost_price=cost_price,
+        selling_price=selling_price,
+        minimum_selling_price=minimum_selling_price,
+    )
     if variant is None:
-        response = catalog.create_product(
-            db,
-            principal,
-            ProductCreate(
-                name=name,
-                slug=slug,
-                description=f"Seeded product: {name}",
-                category_id=category_id,
-                brand_id=brand_id,
-                warranty_months=warranty_months,
-                variants=[
-                    ProductVariantCreate(
-                        name=variant_name,
-                        sku=sku,
-                        tracking_type=tracking_type,
-                        cost_price=cost_price,
-                        selling_price=selling_price,
-                        minimum_selling_price=minimum_selling_price,
-                    )
-                ],
-            ),
-        )
-        result.add("products")
-        product_id = response.id
-        variant = _variant_by_sku(db, sku)
+        product = _product_by_slug(db, slug)
+        if product is None:
+            response = catalog.create_product(
+                db,
+                principal,
+                ProductCreate(
+                    name=name,
+                    slug=slug,
+                    description=f"Seeded product: {name}",
+                    category_id=category_id,
+                    brand_id=brand_id,
+                    warranty_months=warranty_months,
+                    variants=[variant_payload],
+                ),
+            )
+            result.add("products")
+            product_id = response.id
+            variant = _variant_by_sku(db, normalized_sku)
+        else:
+            product.name = name
+            product.description = f"Seeded product: {name}"
+            product.category_id = category_id
+            product.brand_id = brand_id
+            product.warranty_months = warranty_months
+            product.is_active = True
+            variant = catalog.create_variant(db, principal, product.id, variant_payload)
+            product_id = product.id
+            result.add("product_variants")
         if variant is None:
-            raise RuntimeError(f"created variant {sku} could not be loaded")
+            raise RuntimeError(f"created variant {normalized_sku} could not be loaded")
     else:
         product_id = variant.product_id
         product = db.scalar(
@@ -394,6 +418,13 @@ def _product_with_variant(
             product.brand_id = brand_id
             product.warranty_months = warranty_months
             product.is_active = True
+        variant.name = variant_name
+        variant.tracking_type = tracking_type
+        variant.attributes = attributes or {}
+        variant.cost_price = cost_price
+        variant.selling_price = selling_price
+        variant.minimum_selling_price = minimum_selling_price
+        variant.is_active = True
 
     image_count = db.scalar(
         select(func.count())
@@ -415,7 +446,7 @@ def _product_with_variant(
     product = db.get(Product, product_id)
     if product is not None and not product.is_published:
         catalog.set_publication(db, principal, product.id, True)
-    result.ids[sku] = str(variant.id)
+    result.ids[normalized_sku] = str(variant.id)
     return variant
 
 
@@ -570,6 +601,165 @@ def _purchase_and_stock(
         "DEMO-CHG-USBC20": 5,
         "DEMO-USB-64": 10,
         "DEMO-LCD-A15": 3,
+    }
+    for sku, reorder_level in reorder_levels.items():
+        balance = db.scalar(
+            select(StockBalance).where(
+                StockBalance.branch_id == branch.id,
+                StockBalance.variant_id == variants[sku].id,
+                StockBalance.is_deleted.is_(False),
+            )
+        )
+        if balance is not None:
+            balance.reorder_level = reorder_level
+
+
+def _catalog_logic_purchase_and_stock(
+    db: Session,
+    result: DemoSeedResult,
+    principal: AuthPrincipal,
+    branch: Branch,
+    supplier: Supplier,
+    variants: dict[str, ProductVariant],
+) -> None:
+    supplier_reference = "DEMO-PO-CATALOG-LOGIC-001"
+    existing = db.scalar(
+        select(PurchaseOrder).where(
+            PurchaseOrder.supplier_reference == supplier_reference,
+            PurchaseOrder.is_deleted.is_(False),
+        )
+    )
+    if existing is not None:
+        result.ids["catalog_logic_purchase_order"] = str(existing.id)
+        receipt = db.scalar(
+            select(GoodsReceipt)
+            .where(
+                GoodsReceipt.purchase_order_id == existing.id,
+                GoodsReceipt.is_deleted.is_(False),
+            )
+            .order_by(GoodsReceipt.created_at.desc())
+            .limit(1)
+        )
+        if receipt is not None:
+            result.ids["catalog_logic_goods_receipt"] = str(receipt.id)
+        return
+
+    opening_stock = {
+        "DEMO-LAP-HP840-G6": {
+            "quantity": 2,
+            "unit_cost": Decimal("38000.00"),
+            "serial_numbers": ["DEMO-HP840G6-001", "DEMO-HP840G6-002"],
+        },
+        "DEMO-LAP-MBA13-2017": {
+            "quantity": 1,
+            "unit_cost": Decimal("42000.00"),
+            "serial_numbers": ["DEMO-MBA13-2017-001"],
+        },
+        "DEMO-PHN-A15-6-128-BLU": {
+            "quantity": 2,
+            "unit_cost": Decimal("19500.00"),
+            "imeis": ["356000000000101", "356000000000102"],
+        },
+        "DEMO-PHN-HOT40I-128": {
+            "quantity": 3,
+            "unit_cost": Decimal("13000.00"),
+            "imeis": [
+                "352000000000101",
+                "352000000000102",
+                "352000000000103",
+            ],
+        },
+        "DEMO-PHN-IP11-64": {
+            "quantity": 1,
+            "unit_cost": Decimal("33000.00"),
+            "imeis": ["353000000000101"],
+        },
+        "DEMO-CBL-TYPEC-1M": {
+            "quantity": 40,
+            "unit_cost": Decimal("180.00"),
+        },
+        "DEMO-PBANK-OR20K": {
+            "quantity": 10,
+            "unit_cost": Decimal("2200.00"),
+        },
+        "DEMO-MSD-SD128": {
+            "quantity": 25,
+            "unit_cost": Decimal("700.00"),
+        },
+        "DEMO-BAT-IP11": {
+            "quantity": 12,
+            "unit_cost": Decimal("1800.00"),
+        },
+        "DEMO-PORT-TYPEC": {
+            "quantity": 30,
+            "unit_cost": Decimal("250.00"),
+        },
+    }
+    order = purchasing.create_purchase_order(
+        db,
+        principal,
+        PurchaseOrderCreate(
+            branch_id=branch.id,
+            supplier_id=supplier.id,
+            supplier_reference=supplier_reference,
+            notes=(
+                "Demo catalog logic seed: serial, IMEI, and bulk items for "
+                "understanding catalog-to-inventory flow"
+            ),
+            items=[
+                PurchaseOrderItemCreate(
+                    variant_id=variants[sku].id,
+                    ordered_quantity=int(item["quantity"]),
+                    unit_cost=item["unit_cost"],
+                )
+                for sku, item in opening_stock.items()
+            ],
+        ),
+    )
+    purchasing.submit_purchase_order(db, principal, order.id)
+    purchasing.approve_purchase_order(db, principal, order.id)
+    order_items = list(
+        db.scalars(
+            select(PurchaseOrderItem).where(
+                PurchaseOrderItem.purchase_order_id == order.id,
+                PurchaseOrderItem.is_deleted.is_(False),
+            )
+        ).all()
+    )
+    sku_by_variant_id = {variant.id: sku for sku, variant in variants.items()}
+    receipt_items = []
+    for item in order_items:
+        sku = sku_by_variant_id[item.variant_id]
+        stock_item = opening_stock[sku]
+        receipt_items.append(
+            GoodsReceiptItemCreate(
+                purchase_order_item_id=item.id,
+                quantity=int(stock_item["quantity"]),
+                serial_numbers=stock_item.get("serial_numbers", []),
+                imeis=stock_item.get("imeis", []),
+            )
+        )
+    receipt = purchasing.receive_purchase_order(
+        db,
+        principal,
+        order.id,
+        GoodsReceiptCreate(
+            supplier_delivery_note="DEMO-DN-CATALOG-LOGIC-001",
+            notes="Demo receipt showing serial, IMEI, and bulk stock capture",
+            items=receipt_items,
+        ),
+    )
+    result.add("purchase_orders")
+    result.add("goods_receipts")
+    result.ids["catalog_logic_purchase_order"] = str(order.id)
+    result.ids["catalog_logic_goods_receipt"] = str(receipt.id)
+
+    reorder_levels = {
+        "DEMO-CBL-TYPEC-1M": 12,
+        "DEMO-PBANK-OR20K": 4,
+        "DEMO-MSD-SD128": 8,
+        "DEMO-BAT-IP11": 3,
+        "DEMO-PORT-TYPEC": 8,
     }
     for sku, reorder_level in reorder_levels.items():
         balance = db.scalar(
@@ -1186,10 +1376,14 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
         "parts": _category(db, result, admin, "Repair Parts", "repair-parts"),
     }
     brands = {
+        "apple": _brand(db, result, admin, "Apple"),
+        "hp": _brand(db, result, admin, "HP"),
+        "infinix": _brand(db, result, admin, "Infinix"),
         "lenovo": _brand(db, result, admin, "Lenovo"),
         "samsung": _brand(db, result, admin, "Samsung"),
         "oraimo": _brand(db, result, admin, "Oraimo"),
         "kingston": _brand(db, result, admin, "Kingston"),
+        "sandisk": _brand(db, result, admin, "SanDisk"),
         "generic": _brand(db, result, admin, "Generic Parts"),
     }
     variants = {
@@ -1208,6 +1402,57 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             cost_price=Decimal("35000.00"),
             selling_price=Decimal("52000.00"),
             minimum_selling_price=Decimal("48000.00"),
+            attributes={
+                "processor": "Intel Core i5",
+                "ram": "8GB",
+                "storage": "256GB SSD",
+                "condition": "Ex-UK Grade A",
+            },
+        ),
+        "DEMO-LAP-HP840-G6": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="HP EliteBook 840 G6",
+            slug="hp-elitebook-840-g6",
+            category_id=categories["laptops"].id,
+            brand_id=brands["hp"].id,
+            warranty_months=6,
+            variant_name="Core i5 / 8GB / 256GB SSD",
+            sku="DEMO-LAP-HP840-G6",
+            tracking_type=TrackingType.SERIAL,
+            cost_price=Decimal("38000.00"),
+            selling_price=Decimal("56000.00"),
+            minimum_selling_price=Decimal("52000.00"),
+            attributes={
+                "processor": "Intel Core i5",
+                "ram": "8GB",
+                "storage": "256GB SSD",
+                "condition": "Ex-UK Grade A",
+            },
+        ),
+        "DEMO-LAP-MBA13-2017": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Apple MacBook Air 13",
+            slug="apple-macbook-air-13-2017",
+            category_id=categories["laptops"].id,
+            brand_id=brands["apple"].id,
+            warranty_months=3,
+            variant_name="2017 / Core i5 / 8GB / 128GB",
+            sku="DEMO-LAP-MBA13-2017",
+            tracking_type=TrackingType.SERIAL,
+            cost_price=Decimal("42000.00"),
+            selling_price=Decimal("65000.00"),
+            minimum_selling_price=Decimal("60000.00"),
+            attributes={
+                "year": "2017",
+                "processor": "Intel Core i5",
+                "ram": "8GB",
+                "storage": "128GB SSD",
+                "condition": "Pre-owned",
+            },
         ),
         "DEMO-PHN-A15": _product_with_variant(
             db,
@@ -1218,12 +1463,83 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             category_id=categories["phones"].id,
             brand_id=brands["samsung"].id,
             warranty_months=12,
-            variant_name="128GB Dual SIM",
+            variant_name="4GB / 128GB / Black",
             sku="DEMO-PHN-A15",
             tracking_type=TrackingType.IMEI,
             cost_price=Decimal("18000.00"),
             selling_price=Decimal("25000.00"),
             minimum_selling_price=Decimal("23500.00"),
+            attributes={
+                "ram": "4GB",
+                "rom": "128GB",
+                "color": "Black",
+                "sim": "Dual SIM",
+            },
+        ),
+        "DEMO-PHN-A15-6-128-BLU": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Samsung Galaxy A15",
+            slug="samsung-galaxy-a15",
+            category_id=categories["phones"].id,
+            brand_id=brands["samsung"].id,
+            warranty_months=12,
+            variant_name="6GB / 128GB / Blue",
+            sku="DEMO-PHN-A15-6-128-BLU",
+            tracking_type=TrackingType.IMEI,
+            cost_price=Decimal("19500.00"),
+            selling_price=Decimal("27500.00"),
+            minimum_selling_price=Decimal("25500.00"),
+            attributes={
+                "ram": "6GB",
+                "rom": "128GB",
+                "color": "Blue",
+                "sim": "Dual SIM",
+            },
+        ),
+        "DEMO-PHN-HOT40I-128": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Infinix Hot 40i",
+            slug="infinix-hot-40i",
+            category_id=categories["phones"].id,
+            brand_id=brands["infinix"].id,
+            warranty_months=12,
+            variant_name="4GB / 128GB / Palm Blue",
+            sku="DEMO-PHN-HOT40I-128",
+            tracking_type=TrackingType.IMEI,
+            cost_price=Decimal("13000.00"),
+            selling_price=Decimal("17500.00"),
+            minimum_selling_price=Decimal("16500.00"),
+            attributes={
+                "ram": "4GB",
+                "rom": "128GB",
+                "color": "Palm Blue",
+                "sim": "Dual SIM",
+            },
+        ),
+        "DEMO-PHN-IP11-64": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Apple iPhone 11",
+            slug="apple-iphone-11",
+            category_id=categories["phones"].id,
+            brand_id=brands["apple"].id,
+            warranty_months=3,
+            variant_name="64GB / Black",
+            sku="DEMO-PHN-IP11-64",
+            tracking_type=TrackingType.IMEI,
+            cost_price=Decimal("33000.00"),
+            selling_price=Decimal("48000.00"),
+            minimum_selling_price=Decimal("45000.00"),
+            attributes={
+                "rom": "64GB",
+                "color": "Black",
+                "condition": "Pre-owned",
+            },
         ),
         "DEMO-CHG-USBC20": _product_with_variant(
             db,
@@ -1240,6 +1556,52 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             cost_price=Decimal("800.00"),
             selling_price=Decimal("1500.00"),
             minimum_selling_price=Decimal("1200.00"),
+            attributes={
+                "watts": "20W",
+                "connector": "USB-C",
+                "tracking": "Quantity only",
+            },
+        ),
+        "DEMO-CBL-TYPEC-1M": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Oraimo Type-C Cable",
+            slug="oraimo-type-c-cable",
+            category_id=categories["accessories"].id,
+            brand_id=brands["oraimo"].id,
+            warranty_months=1,
+            variant_name="1M Fast Charging Cable",
+            sku="DEMO-CBL-TYPEC-1M",
+            tracking_type=TrackingType.BULK,
+            cost_price=Decimal("180.00"),
+            selling_price=Decimal("450.00"),
+            minimum_selling_price=Decimal("350.00"),
+            attributes={
+                "length": "1M",
+                "connector": "USB-C",
+                "tracking": "Quantity only",
+            },
+        ),
+        "DEMO-PBANK-OR20K": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Oraimo Power Bank",
+            slug="oraimo-power-bank-20000mah",
+            category_id=categories["accessories"].id,
+            brand_id=brands["oraimo"].id,
+            warranty_months=6,
+            variant_name="20000mAh",
+            sku="DEMO-PBANK-OR20K",
+            tracking_type=TrackingType.BULK,
+            cost_price=Decimal("2200.00"),
+            selling_price=Decimal("3800.00"),
+            minimum_selling_price=Decimal("3400.00"),
+            attributes={
+                "capacity": "20000mAh",
+                "tracking": "Quantity only",
+            },
         ),
         "DEMO-USB-64": _product_with_variant(
             db,
@@ -1256,6 +1618,32 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             cost_price=Decimal("450.00"),
             selling_price=Decimal("900.00"),
             minimum_selling_price=Decimal("750.00"),
+            attributes={
+                "capacity": "64GB",
+                "interface": "USB 3.0",
+                "tracking": "Quantity only",
+            },
+        ),
+        "DEMO-MSD-SD128": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="SanDisk Memory Card",
+            slug="sandisk-memory-card-128gb",
+            category_id=categories["accessories"].id,
+            brand_id=brands["sandisk"].id,
+            warranty_months=1,
+            variant_name="128GB MicroSD",
+            sku="DEMO-MSD-SD128",
+            tracking_type=TrackingType.BULK,
+            cost_price=Decimal("700.00"),
+            selling_price=Decimal("1300.00"),
+            minimum_selling_price=Decimal("1100.00"),
+            attributes={
+                "capacity": "128GB",
+                "type": "MicroSD",
+                "tracking": "Quantity only",
+            },
         ),
         "DEMO-LCD-A15": _product_with_variant(
             db,
@@ -1271,11 +1659,59 @@ def seed_demo_data(db: Session, *, password: str = DEMO_PASSWORD) -> DemoSeedRes
             tracking_type=TrackingType.BULK,
             cost_price=Decimal("2500.00"),
             selling_price=Decimal("4500.00"),
+            attributes={
+                "compatible_model": "Samsung Galaxy A15",
+                "part_type": "Screen",
+                "tracking": "Quantity only",
+            },
+        ),
+        "DEMO-BAT-IP11": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="iPhone 11 Battery",
+            slug="iphone-11-battery",
+            category_id=categories["parts"].id,
+            brand_id=brands["generic"].id,
+            warranty_months=0,
+            variant_name="Replacement Battery",
+            sku="DEMO-BAT-IP11",
+            tracking_type=TrackingType.BULK,
+            cost_price=Decimal("1800.00"),
+            selling_price=Decimal("3500.00"),
+            minimum_selling_price=Decimal("3000.00"),
+            attributes={
+                "compatible_model": "Apple iPhone 11",
+                "part_type": "Battery",
+                "tracking": "Quantity only",
+            },
+        ),
+        "DEMO-PORT-TYPEC": _product_with_variant(
+            db,
+            result,
+            admin,
+            name="Type-C Charging Port",
+            slug="type-c-charging-port",
+            category_id=categories["parts"].id,
+            brand_id=brands["generic"].id,
+            warranty_months=0,
+            variant_name="Universal Board Part",
+            sku="DEMO-PORT-TYPEC",
+            tracking_type=TrackingType.BULK,
+            cost_price=Decimal("250.00"),
+            selling_price=Decimal("800.00"),
+            minimum_selling_price=Decimal("650.00"),
+            attributes={
+                "part_type": "Charging port",
+                "connector": "USB-C",
+                "tracking": "Quantity only",
+            },
         ),
     }
 
     supplier = _supplier(db, result, admin)
     _purchase_and_stock(db, result, admin, hq, supplier, variants)
+    _catalog_logic_purchase_and_stock(db, result, admin, hq, supplier, variants)
     session = _till_and_session(db, result, manager, cashier, hq)
     customer = _customer(db, result, cashier, hq)
     sold_unit = _pos_sale(db, result, cashier, hq, customer, session, variants)

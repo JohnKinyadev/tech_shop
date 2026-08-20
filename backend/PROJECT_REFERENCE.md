@@ -60,9 +60,15 @@ Seeded staff users:
 Seeded records include:
 
 - Branches: `HQ`, `EAST`
-- Products/SKUs: `DEMO-LAP-T480`, `DEMO-PHN-A15`, `DEMO-CHG-USBC20`,
-  `DEMO-USB-64`, `DEMO-LCD-A15`
-- Supplier, purchase order, goods receipt, stock balances/movements
+- Serial-tracked laptops: `DEMO-LAP-T480`, `DEMO-LAP-HP840-G6`,
+  `DEMO-LAP-MBA13-2017`
+- IMEI-tracked phones: `DEMO-PHN-A15`, `DEMO-PHN-A15-6-128-BLU`,
+  `DEMO-PHN-HOT40I-128`, `DEMO-PHN-IP11-64`
+- Bulk accessories/storage/power: `DEMO-CHG-USBC20`, `DEMO-CBL-TYPEC-1M`,
+  `DEMO-PBANK-OR20K`, `DEMO-USB-64`, `DEMO-MSD-SD128`
+- Bulk repair parts: `DEMO-LCD-A15`, `DEMO-BAT-IP11`, `DEMO-PORT-TYPEC`
+- Supplier, purchase orders, goods receipts, stock balances/movements,
+  serialized units, and IMEI units
 - Open cashier till session
 - Customer, completed POS sale, payment, warranty data
 - Pending inventory adjustment request, draft stock transfer, stock count workflow

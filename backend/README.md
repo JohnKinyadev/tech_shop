@@ -59,7 +59,9 @@ python -m backend.cli.seed_demo
 ```
 
 The seed creates reusable branches, users, catalog items, stock, POS, repairs,
-expenses, and report data. Default seeded password is `DemoPass123!`.
+expenses, and report data. It includes serial-tracked laptops, IMEI-tracked phones,
+bulk accessories, and repair parts so Catalog, Purchases, Inventory, POS, and Repairs
+can be reviewed as one connected flow. Default seeded password is `DemoPass123!`.
 
 Run a read-only backend smoke check after seeding with:
 
